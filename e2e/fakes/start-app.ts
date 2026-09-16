@@ -21,8 +21,10 @@ const astro = spawn(
       // Astro detecta que lo lanza un agente y se iría a segundo plano; esto lo fuerza en primer plano
       ASTRO_DEV_BACKGROUND: '1',
       COROS_MCP_URL: COROS_URL,
+      // Clave y base URL falsas: si algo se saltara el modelo mock, la petición muere en local
       OPENAI_API_KEY: 'e2e-fake-key',
       OPENAI_MODEL: 'fake-model',
+      OPENAI_BASE_URL: 'http://127.0.0.1:9',
       // Sin colores ni telemetría en la salida del dev server
       ASTRO_TELEMETRY_DISABLED: '1',
       FORCE_COLOR: '0',
