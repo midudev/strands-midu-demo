@@ -1,0 +1,5 @@
+strands.midu.run {
+	reverse_proxy app:4321 {
+		flush_interval -1
+	}
+}
