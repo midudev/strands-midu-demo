@@ -22,3 +22,22 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# coach
+.coros/
+out/
+data/*.json
+data/tracks/
+data/strands/
+
+# capturas y logs del navegador de pruebas (Playwright MCP / agent-browser)
+.playwright-mcp/
+*.log
+
+# carpeta basura creada por accidente (volcado de la web como ficheros)
+midu.run/
+
+# tests e2e (Playwright): sandbox de datos, resultados e informes
+e2e/.sandbox/
+e2e/.results/
+playwright-report/
