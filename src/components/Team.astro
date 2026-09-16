@@ -1,0 +1,475 @@
+---
+// Lo que piensa cada especialista hoy. Cada uno es un Agent de Strands independiente (el mismo que el coach
+// invoca como tool en el chat) que mira COROS por su cuenta. Se pide por separado para que cada tarjeta llegue cuando acabe.
+// Con runId opina sobre esa sesión, bajo demanda (botón) y con caché por sesión.
+import { SPECIALISTS } from '../agent/prompts/team'
+
+interface Props {
+  /** Sesión concreta: la opinión es sobre ella y se pide con un clic */
+  runId?: string
+  /** Qué miembros del equipo; por defecto todos */
+  who?: string[]
+  label?: string
+}
+const { runId, who, label = runId ? 'Lo que piensa el equipo · esta sesión' : 'Lo que piensa el equipo · hoy' } = Astro.props
+const team = who ? SPECIALISTS.filter((s) => who.includes(s.id)) : SPECIALISTS
+const ondemand = Boolean(runId)
+---
+
+<section class="team" id="team" data-run={runId} data-ondemand={ondemand ? '' : undefined}>
+  <div class="head">
+    <p class="label">{label}</p>
+    <button class="btn ghost" id="team-refresh" type="button">{ondemand ? 'Pedir opinión' : 'Regenerar'}</button>
+  </div>
+  <div class="rows">
+    {
+      team.map((s) => (
+        <article class="row" data-id={s.id} data-state={ondemand ? 'idle' : 'loading'}>
+          <div class="side">
+            <img class="avatar" src={s.avatar} alt="" width="512" height="512" loading="lazy" decoding="async" />
+            <span class="pixel who">{s.nombre}</span>
+            <span class="pixel status"><i class="px" aria-hidden="true"><b /><b /><b /><b /></i><span class="ms">{ondemand ? 'A la espera' : 'Pensando'}</span></span>
+          </div>
+          <div class="text">
+            {ondemand && (
+              <button class="ask" type="button">
+                <span class="pixel">Pedir opinión</span>
+                <small>{s.nombre === 'Entrenador' ? 'Analiza esta sesión: ritmo, vueltas, FC y qué se lleva para Valencia.' : `Lectura de esta sesión desde su campo.`}</small>
+              </button>
+            )}
+            <div class="opinion"></div>
+            <p class="thought" aria-live="polite" hidden></p>
+          </div>
+        </article>
+      ))
+    }
+  </div>
+</section>
+
+<script>
+  const section = document.getElementById('team')!
+  const cards = section.querySelectorAll<HTMLElement>('.row')
+  const btn = document.getElementById('team-refresh') as HTMLButtonElement
+  const runId = section.dataset.run
+  const ondemand = 'ondemand' in section.dataset
+  const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`)
+  const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  // Markdown mínimo: **negrita**, *cursiva* y párrafos. Se escapa antes para que el modelo no pueda meter HTML.
+  const md = (t: string) =>
+    esc(t.trim())
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>')
+      .split(/\n{2,}/)
+      .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
+      .join('')
+
+  const TOOLS: Record<string, string> = {
+    queryTrainingLoadAssessment: 'carga',
+    queryRecoveryStatus: 'recuperación',
+    querySportRecords: 'entrenamientos',
+    getActivityDetail: 'sesión',
+    queryActivityLapData: 'vueltas',
+    queryFitnessAssessmentOverview: 'fitness',
+    querySleepData: 'sueño',
+    querySleepHrv: 'HRV',
+  }
+
+  // Lo que "piensa" cada uno mientras trabaja: frases propias que rotan, y una concreta cuando llama a una tool.
+  const THOUGHTS: Record<string, string[]> = {
+    fisio: [
+      'Voy a revisar cómo has dormido…',
+      'Mmm, déjame ver la recuperación…',
+      'Comprobando la carga de estos días…',
+      'Cruzando sueño y carga…',
+      '¿Alguna molestia reciente? Repasando…',
+    ],
+    entrenador: [
+      'Voy a revisar las notas de la semana…',
+      'Mmm, estoy viendo el último entrenamiento…',
+      'Repasando ritmos y VO2max…',
+      'Calculando cuánto queda para Valencia…',
+      'Pensando qué sesión te toca hoy…',
+    ],
+    nutricionista: [
+      'Sumando kilómetros y kcal de la semana…',
+      'Mmm, viendo cuánto has gastado…',
+      'Calculando carbohidratos por hora…',
+      'Mirando la duración de las últimas salidas…',
+      'Pensando en la estrategia de geles…',
+    ],
+  }
+  const TOOL_THOUGHTS: Record<string, string> = {
+    querySleepData: 'Mmm, viendo cómo has dormido…',
+    querySleepHrv: 'Mirando la variabilidad cardíaca…',
+    queryRecoveryStatus: 'Comprobando tu recuperación en COROS…',
+    queryTrainingLoadAssessment: 'Mirando la carga de entrenamiento…',
+    querySportRecords: 'Mmm, estoy viendo los últimos entrenamientos…',
+    queryFitnessAssessmentOverview: 'Repasando tu VO2max y ritmo umbral…',
+    getActivityDetail: 'Abriendo el detalle de esa sesión…',
+    queryActivityLapData: 'Mirando las vueltas una a una…',
+  }
+  const FALLBACK = ['Pensando…', 'Ordenando ideas…', 'Un momento…']
+
+  function thinker(card: HTMLElement) {
+    const el = card.querySelector<HTMLElement>('.thought')!
+    const pool = THOUGHTS[card.dataset.id ?? ''] ?? FALLBACK
+    let i = Math.floor(Math.random() * pool.length)
+    let timer = 0
+    let stopped = false
+    el.hidden = false
+    const show = (text: string) => {
+      if (stopped) return
+      el.classList.remove('in')
+      el.classList.add('out')
+      window.setTimeout(() => {
+        if (stopped) return
+        el.textContent = text
+        el.classList.remove('out')
+        el.classList.add('in')
+      }, 220)
+    }
+    const next = () => {
+      show(pool[i++ % pool.length]!)
+      timer = window.setTimeout(next, 2600)
+    }
+    el.textContent = pool[i++ % pool.length]!
+    el.classList.add('in')
+    timer = window.setTimeout(next, 2600)
+    return {
+      tool(name: string) {
+        window.clearTimeout(timer)
+        show(TOOL_THOUGHTS[name] ?? `Consultando ${TOOLS[name] ?? name}…`)
+        timer = window.setTimeout(next, 3200)
+      },
+      stop() {
+        stopped = true
+        window.clearTimeout(timer)
+        el.classList.remove('in', 'out')
+        el.hidden = true
+        el.textContent = ''
+      },
+    }
+  }
+
+  async function load(card: HTMLElement, refresh = false, cachedOnly = false) {
+    const opinion = card.querySelector<HTMLElement>('.opinion')!
+    const ms = card.querySelector<HTMLElement>('.ms')!
+    card.dataset.state = 'loading'
+    opinion.replaceChildren()
+    opinion.classList.remove('streaming')
+    ms.textContent = cachedOnly ? 'A la espera' : 'Pensando'
+    const mind = cachedOnly ? null : thinker(card)
+    let text = ''
+    const params = new URLSearchParams({ who: card.dataset.id ?? '' })
+    if (runId) params.set('run', runId)
+    if (refresh) params.set('refresh', '')
+    if (cachedOnly) params.set('cached', '')
+    try {
+      const res = await fetch(`/api/team?${params}`)
+      if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const chunk = JSON.parse(line)
+          if (chunk.type === 'idle') {
+            card.dataset.state = 'idle'
+            return
+          } else if (chunk.type === 'tool') {
+            ms.textContent = `Mirando ${TOOLS[chunk.name] ?? chunk.name}`
+            mind?.tool(chunk.name)
+          } else if (chunk.type === 'text') {
+            if (!text) {
+              mind?.stop()
+              ms.textContent = 'Escribiendo'
+              opinion.classList.add('streaming')
+            }
+            text += chunk.text
+            opinion.innerHTML = md(text)
+          } else if (chunk.type === 'done') {
+            mind?.stop()
+            text = chunk.take.opinion
+            opinion.innerHTML = md(text)
+            ms.textContent = chunk.cache ? `${fmtMs(chunk.take.ms)} · ${runId ? 'guardada' : 'hoy'}` : fmtMs(chunk.take.ms)
+            card.dataset.state = 'ready'
+          } else if (chunk.type === 'error') {
+            throw new Error(chunk.message)
+          }
+        }
+      }
+      if (card.dataset.state !== 'ready') throw new Error('Sin respuesta')
+    } catch (err) {
+      opinion.textContent = (err as Error).message
+      ms.textContent = 'error'
+      card.dataset.state = 'error'
+    } finally {
+      mind?.stop()
+      opinion.classList.remove('streaming')
+      if (ondemand) btn.textContent = [...cards].some((c) => c.dataset.state === 'ready') ? 'Regenerar' : 'Pedir opinión'
+    }
+  }
+
+  async function loadAll(refresh = false, cachedOnly = false) {
+    btn.disabled = true
+    await Promise.all([...cards].map((c) => load(c, refresh, cachedOnly)))
+    btn.disabled = false
+  }
+
+  btn.addEventListener('click', () => loadAll(true))
+  cards.forEach((card) => card.querySelector('.ask')?.addEventListener('click', () => load(card, true)))
+  // Bajo demanda: solo recuperamos lo que ya esté en caché; generar cuesta un clic.
+  loadAll(false, ondemand)
+</script>
+
+<style>
+  .team {
+    padding: 2.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .rows {
+    display: grid;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
+    padding: 1.75rem 0;
+  }
+  .row + .row {
+    border-top: 1px solid var(--line);
+  }
+  .side {
+    display: grid;
+    justify-items: start;
+    gap: 0.45rem;
+  }
+  .avatar {
+    width: 9rem;
+    height: 9rem;
+    display: block;
+    margin-bottom: 0.35rem;
+    object-fit: cover;
+    background: radial-gradient(circle at 50% 62%, color-mix(in srgb, var(--ok) 18%, transparent), transparent 68%);
+    filter: grayscale(0.7) brightness(0.75);
+    transition: filter 0.6s;
+  }
+  .row[data-state='ready'] .avatar {
+    filter: none;
+  }
+  .who {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .ms {
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .px {
+    display: grid;
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    grid-template: 1fr 1fr / 1fr 1fr;
+    gap: 1px;
+  }
+  .px b {
+    background: var(--faint);
+  }
+  .row[data-state='loading'] .px b {
+    animation: px 0.64s steps(1) infinite;
+  }
+  .row[data-state='loading'] .px b:nth-child(2) {
+    animation-delay: 0.16s;
+  }
+  .row[data-state='loading'] .px b:nth-child(3) {
+    animation-delay: 0.48s;
+  }
+  .row[data-state='loading'] .px b:nth-child(4) {
+    animation-delay: 0.32s;
+  }
+  .row[data-state='ready'] .px {
+    background: var(--ok);
+  }
+  .row[data-state='error'] .px {
+    background: var(--warn);
+  }
+  .row[data-state='ready'] .px b,
+  .row[data-state='error'] .px b {
+    display: none;
+  }
+  @keyframes px {
+    0%,
+    24% {
+      background: var(--accent);
+    }
+    25%,
+    100% {
+      background: var(--faint);
+    }
+  }
+  .text {
+    min-width: 0;
+  }
+  .ask {
+    display: none;
+    width: 100%;
+    max-width: 46rem;
+    padding: 1.1rem 1.25rem;
+    text-align: left;
+    background: var(--bg-2);
+    border: 1px dashed var(--faint);
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .ask:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
+  }
+  .ask span {
+    display: block;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.35rem;
+  }
+  .ask small {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .row[data-state='idle'] .ask {
+    display: block;
+  }
+  .row[data-state='idle'] .px {
+    background: var(--faint);
+  }
+  .row[data-state='idle'] .px b {
+    display: none;
+  }
+  .opinion {
+    max-width: 46rem;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  .opinion :global(p) {
+    margin: 0 0 0.85rem;
+  }
+  .opinion :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .opinion {
+    color: color-mix(in srgb, var(--fg) 82%, var(--muted));
+  }
+  .opinion :global(strong) {
+    font-weight: 600;
+    color: #fff;
+  }
+  .opinion.streaming :global(p:last-child)::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 0.5em;
+    margin-left: 0.2em;
+    vertical-align: 0.05em;
+    background: var(--ok);
+    animation: caret 0.9s ease-in-out infinite;
+  }
+  @keyframes caret {
+    50% {
+      opacity: 0.2;
+    }
+  }
+  .opinion :global(em) {
+    font-style: italic;
+    color: color-mix(in srgb, var(--fg) 70%, var(--ok));
+  }
+  .thought {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    font-style: italic;
+    color: var(--muted);
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  .thought[hidden] {
+    display: none;
+  }
+  .thought.in {
+    animation: thought-in 0.35s ease-out forwards;
+  }
+  .thought.out {
+    animation: thought-out 0.22s ease-in forwards;
+  }
+  @keyframes thought-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes thought-out {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row[data-state='loading'] .px b,
+    .opinion.streaming :global(p:last-child)::after {
+      animation: none;
+    }
+    .thought,
+    .thought.in,
+    .thought.out {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @media (max-width: 640px) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      padding: 1.25rem 0;
+    }
+    .avatar {
+      width: 7rem;
+      height: 7rem;
+    }
+    .opinion {
+      font-size: 0.9rem;
+    }
+  }
+</style>

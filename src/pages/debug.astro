@@ -1,0 +1,712 @@
+---
+import Layout from '../layouts/Layout.astro'
+import { getDebugSnapshot } from '../lib/debug'
+
+export const prerender = false
+
+const initial = getDebugSnapshot()
+---
+
+<Layout title="debug · midu.run" description="Trazas internas y reset de datos locales">
+  <main class="dbg" id="debug" data-initial={JSON.stringify(initial)}>
+    <header class="top">
+      <a href="/" class="pixel brand">midu.run<span>/debug</span></a>
+      <p class="pixel clock" id="clock"></p>
+    </header>
+
+    <section class="panel danger">
+      <div>
+        <p class="label">Zona de peligro</p>
+        <p class="lead">
+          Borra briefing, predicciones, cache de carreras, sesión de COROS, memoria del chat y
+          almacenamiento del navegador.
+        </p>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" type="button" id="clear-traces">Vaciar trazas</button>
+        <button class="btn danger" type="button" id="wipe">Borrar todo</button>
+      </div>
+    </section>
+    <p class="flash" id="flash" hidden></p>
+
+    <section class="grid">
+      <article>
+        <p class="label">Runtime</p>
+        <dl id="runtime"></dl>
+      </article>
+      <article>
+        <p class="label">Archivos locales <span class="count" id="files-count"></span></p>
+        <ul class="files" id="files"></ul>
+      </article>
+    </section>
+
+    <dialog class="file-view" id="file-view">
+      <header>
+        <div>
+          <p class="pixel path" id="file-view-path"></p>
+          <p class="note" id="file-view-note" hidden>Tokens y secretos ocultos</p>
+        </div>
+        <button class="btn ghost" type="button" id="file-view-close">Cerrar</button>
+      </header>
+      <pre id="file-view-body"></pre>
+    </dialog>
+
+    <section>
+      <p class="label">Datos guardados</p>
+      <div class="stored" id="stored"></div>
+    </section>
+
+    <section class="traces-panel">
+      <div class="head">
+        <p class="label">Trazas en vivo</p>
+        <div class="filters" id="filters"></div>
+        <label class="live">
+          <input type="checkbox" id="live" checked />
+          auto
+        </label>
+      </div>
+      <ol class="traces" id="traces"></ol>
+    </section>
+  </main>
+</Layout>
+
+<script>
+  type Level = 'debug' | 'info' | 'warn' | 'error'
+  type Trace = { id: number; ts: string; scope: string; level: Level; message: string; data?: unknown }
+  type Snapshot = {
+    runtime: {
+      now: string
+      node: string
+      uptimeSec: number
+      rssMb: number
+      model: string
+      openaiKey: boolean
+      corosConnected: boolean
+      chatAgent: boolean
+    }
+    files: { path: string; exists: boolean; bytes: number; mtime: string | null }[]
+    stored: {
+      briefing: unknown
+      predictions: Record<string, unknown>
+      races: unknown
+      coros: unknown
+    }
+    traces: Trace[]
+    tracesMeta: { count: number; lastId: number; cap: number }
+  }
+
+  const root = document.getElementById('debug')!
+  let state: Snapshot = JSON.parse(root.dataset.initial ?? '{}')
+  delete root.dataset.initial
+
+  const runtimeEl = document.getElementById('runtime')!
+  const filesEl = document.getElementById('files')!
+  const filesCountEl = document.getElementById('files-count')!
+  const storedEl = document.getElementById('stored')!
+  const tracesEl = document.getElementById('traces')!
+  const filtersEl = document.getElementById('filters')!
+  const flashEl = document.getElementById('flash')!
+  const clockEl = document.getElementById('clock')!
+  const liveEl = document.getElementById('live') as HTMLInputElement
+  const wipeBtn = document.getElementById('wipe') as HTMLButtonElement
+  const clearBtn = document.getElementById('clear-traces') as HTMLButtonElement
+  const fileView = document.getElementById('file-view') as HTMLDialogElement
+  const fileViewPath = document.getElementById('file-view-path')!
+  const fileViewNote = document.getElementById('file-view-note')!
+  const fileViewBody = document.getElementById('file-view-body')!
+
+  let filter = 'all'
+  const seen = new Set<number>()
+  let storedKey = ''
+  let filesKey = ''
+  let scopesKey = ''
+
+  const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`)
+  const fmtUptime = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h`)
+  const fmtTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })
+  const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+  const dump = (value: unknown) => esc(JSON.stringify(value, null, 2) ?? 'null')
+
+  const flash = (text: string, kind: 'ok' | 'warn' = 'ok') => {
+    flashEl.hidden = false
+    flashEl.className = `flash ${kind}`
+    flashEl.textContent = text
+  }
+
+  const row = (k: string, v: string, ok?: boolean) =>
+    `<div><dt>${esc(k)}</dt><dd class="${ok === undefined ? '' : ok ? 'ok' : 'off'}">${esc(v)}</dd></div>`
+
+  function renderRuntime() {
+    const r = state.runtime
+    runtimeEl.innerHTML = [
+      row('COROS', r.corosConnected ? 'conectado' : 'off', r.corosConnected),
+      row('Chat', r.chatAgent ? 'en memoria' : 'sin sesión', r.chatAgent),
+      row('Modelo', r.model),
+      row('OpenAI key', r.openaiKey ? 'sí' : 'no', r.openaiKey),
+      row('Node', r.node),
+      row('Uptime', fmtUptime(r.uptimeSec)),
+      row('RSS', `${r.rssMb} MB`),
+    ].join('')
+    clockEl.textContent = fmtTime(r.now)
+  }
+
+  function renderFiles() {
+    const key = JSON.stringify(state.files)
+    if (key === filesKey) return
+    filesKey = key
+    const emptyCount = state.files.filter((f) => !f.exists || f.bytes === 0).length
+    const total = state.files.length
+    filesCountEl.textContent = emptyCount === 0 ? `${total} ok` : `${emptyCount}/${total} vacios`
+    filesEl.innerHTML = state.files
+      .map((f) => {
+        const empty = !f.exists || f.bytes === 0
+        const when = f.mtime
+          ? new Date(f.mtime).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })
+          : ''
+        const inner = `
+          <i class="dot" aria-hidden="true"></i>
+          <code>${esc(f.path)}</code>
+          <span class="meta">
+            ${empty ? '' : `<time>${esc(when)}</time>`}
+            <span class="tag">${empty ? 'vacio' : fmtBytes(f.bytes)}</span>
+          </span>`
+        return empty
+          ? `<li class="empty">${inner}</li>`
+          : `<li><button type="button" class="ok" data-file="${esc(f.path)}">${inner}</button></li>`
+      })
+      .join('')
+  }
+
+  function renderStored() {
+    const key = JSON.stringify(state.stored)
+    if (key === storedKey) return
+    storedKey = key
+    const blocks: [string, unknown][] = [
+      ['briefing', state.stored.briefing],
+      ['predicciones', state.stored.predictions],
+      ['carreras', state.stored.races],
+      ['coros (sanitizado)', state.stored.coros],
+    ]
+    storedEl.innerHTML = blocks
+      .map(([title, value]) => `<details><summary class="pixel">${esc(title)}</summary><pre>${dump(value)}</pre></details>`)
+      .join('')
+  }
+
+  function scopes() {
+    return ['all', ...new Set(state.traces.map((t) => t.scope))]
+  }
+
+  function renderFilters() {
+    const key = `${filter}:${scopes().join(',')}`
+    if (key === scopesKey) return
+    scopesKey = key
+    filtersEl.innerHTML = scopes()
+      .map((s) => `<button type="button" class="chip${filter === s ? ' on' : ''}" data-scope="${esc(s)}">${esc(s)}</button>`)
+      .join('')
+  }
+
+  function renderTraces(append = false) {
+    const list = [...state.traces].reverse().filter((t) => filter === 'all' || t.scope === filter)
+    if (!append) {
+      seen.clear()
+      tracesEl.innerHTML =
+        list.length === 0
+          ? '<li class="empty">Aún no hay trazas. Usa la app y aparecen aquí.</li>'
+          : list.map(traceItem).join('')
+      list.forEach((t) => seen.add(t.id))
+      return
+    }
+    tracesEl.querySelector('.empty')?.remove()
+    for (const t of [...state.traces].sort((a, b) => a.id - b.id)) {
+      if (seen.has(t.id)) continue
+      if (filter !== 'all' && t.scope !== filter) continue
+      tracesEl.insertAdjacentHTML('afterbegin', traceItem(t))
+      seen.add(t.id)
+    }
+  }
+
+  function traceItem(t: Trace) {
+    const data =
+      t.data !== undefined
+        ? `<details><summary>datos</summary><pre>${dump(t.data)}</pre></details>`
+        : ''
+    return `<li class="tr ${t.level}" data-id="${t.id}">
+      <time>${esc(fmtTime(t.ts))}</time>
+      <span class="scope">${esc(t.scope)}</span>
+      <span class="msg">${esc(t.message)}</span>
+      ${data}
+    </li>`
+  }
+
+  function render(full = true) {
+    if (full) {
+      storedKey = ''
+      filesKey = ''
+      scopesKey = ''
+    }
+    renderRuntime()
+    renderFiles()
+    renderStored()
+    renderFilters()
+    renderTraces(!full)
+  }
+
+  async function pull(full = false) {
+    const after = full ? 0 : state.tracesMeta.lastId
+    const res = await fetch(`/api/debug?after=${after}`)
+    if (!res.ok) throw new Error(res.statusText)
+    const next = (await res.json()) as Snapshot
+    if (full || after === 0) {
+      state = next
+      render(true)
+      return
+    }
+    state.runtime = next.runtime
+    state.files = next.files
+    state.stored = next.stored
+    state.tracesMeta = next.tracesMeta
+    if (next.traces.length) state.traces = [...state.traces, ...next.traces].slice(-400)
+    render(false)
+  }
+
+  function wipeBrowser() {
+    localStorage.clear()
+    sessionStorage.clear()
+    if ('caches' in window) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)))
+  }
+
+  wipeBtn.addEventListener('click', async () => {
+    if (!confirm('Esto borra briefing, predicciones, carreras, sesión de COROS y el chat en memoria. ¿Seguro?')) return
+    wipeBtn.disabled = true
+    try {
+      const res = await fetch('/api/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'wipe' }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      wipeBrowser()
+      state = data
+      fileView.close()
+      render(true)
+      flash(`Borrado: ${(data.wiped as string[]).join(', ') || 'nada que borrar'}.`)
+    } catch (err) {
+      flash((err as Error).message, 'warn')
+    } finally {
+      wipeBtn.disabled = false
+    }
+  })
+
+  clearBtn.addEventListener('click', async () => {
+    const res = await fetch('/api/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'clear-traces' }) })
+    state = await res.json()
+    render(true)
+    flash('Trazas vaciadas.')
+  })
+
+  filtersEl.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-scope]')
+    if (!btn) return
+    filter = btn.dataset.scope ?? 'all'
+    renderFilters()
+    renderTraces(false)
+  })
+
+  async function openFile(path: string) {
+    fileViewPath.textContent = path
+    fileViewNote.hidden = true
+    fileViewBody.textContent = 'Cargando…'
+    if (!fileView.open) fileView.showModal()
+    try {
+      const res = await fetch(`/api/debug?file=${encodeURIComponent(path)}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      fileViewNote.hidden = !data.sanitized
+      fileViewBody.textContent =
+        typeof data.content === 'string' ? data.content : JSON.stringify(data.content, null, 2) ?? 'null'
+    } catch (err) {
+      fileViewBody.textContent = (err as Error).message
+    }
+  }
+
+  filesEl.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-file]')
+    if (!btn?.dataset.file) return
+    openFile(btn.dataset.file)
+  })
+  document.getElementById('file-view-close')!.addEventListener('click', () => fileView.close())
+  fileView.addEventListener('click', (e) => {
+    if (e.target === fileView) fileView.close()
+  })
+
+  render(true)
+  setInterval(() => {
+    if (liveEl.checked) pull().catch(() => {})
+  }, 2000)
+</script>
+
+<style>
+  .dbg {
+    max-width: 64rem;
+    margin: 0 auto;
+    padding: 0 1.25rem 3rem;
+  }
+  .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 1.25rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    text-decoration: none;
+    font-size: 1rem;
+  }
+  .brand span {
+    color: var(--accent);
+  }
+  .clock {
+    margin: 0;
+    font-size: 0.7rem;
+    color: var(--faint);
+  }
+  .panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .lead {
+    margin: 0;
+    max-width: 36rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+  .btn.danger {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #111;
+  }
+  .btn.danger:hover {
+    background: transparent;
+    color: var(--accent);
+  }
+  .flash {
+    margin: 1rem 0 0;
+    font-size: 0.8rem;
+    color: var(--ok);
+  }
+  .flash.warn {
+    color: var(--warn);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    padding: 2rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  dl {
+    margin: 0;
+    display: grid;
+    gap: 0.45rem;
+  }
+  dl :global(div) {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+  }
+  dt {
+    color: var(--faint);
+  }
+  dd {
+    margin: 0;
+  }
+  dd.ok {
+    color: var(--ok);
+  }
+  dd.off {
+    color: var(--muted);
+  }
+  .count {
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+  .files {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .files :global(li.empty),
+  .files :global(button.ok) {
+    display: grid;
+    grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem 0.7rem;
+    padding: 0.5rem 0.6rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--faint);
+    width: 100%;
+    text-align: left;
+  }
+  .files :global(button.ok) {
+    border-left-color: var(--ok);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .files :global(button.ok:hover),
+  .files :global(button.ok:focus-visible) {
+    background: color-mix(in srgb, var(--ok) 8%, var(--bg-2));
+  }
+  .files :global(button.ok:focus-visible) {
+    outline: 1px solid var(--ok);
+    outline-offset: 2px;
+  }
+  .files :global(li.empty) {
+    border-left-color: var(--warn);
+  }
+  .files :global(.dot) {
+    display: block;
+    width: 7px;
+    height: 7px;
+    background: var(--faint);
+  }
+  .files :global(button.ok .dot) {
+    background: var(--ok);
+  }
+  .files :global(li.empty .dot) {
+    background: var(--warn);
+  }
+  .files :global(code) {
+    min-width: 0;
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+  }
+  .files :global(li.empty code) {
+    color: var(--muted);
+  }
+  .files :global(.meta) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .files :global(time) {
+    font-size: 0.65rem;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .files :global(.tag) {
+    padding: 0.12rem 0.4rem;
+    border: 1px solid var(--line);
+    font-family: var(--font-pixel);
+    font-size: 0.58rem;
+    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .files :global(button.ok .tag) {
+    color: var(--ok);
+    border-color: #1f4a34;
+  }
+  .files :global(li.empty .tag) {
+    color: var(--warn);
+    border-color: #5a4a10;
+  }
+  @media (max-width: 720px) {
+    .files :global(time) {
+      display: none;
+    }
+  }
+  .file-view {
+    width: min(52rem, calc(100vw - 2rem));
+    max-height: min(80vh, 44rem);
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .file-view::backdrop {
+    background: rgb(0 0 0 / 0.72);
+  }
+  .file-view header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+  }
+  .file-view .path {
+    margin: 0;
+    font-size: 0.72rem;
+    overflow-wrap: anywhere;
+  }
+  .file-view .note {
+    margin: 0.25rem 0 0;
+    font-size: 0.7rem;
+    color: var(--warn);
+  }
+  .file-view pre {
+    margin: 0;
+    padding: 1rem;
+    max-height: calc(80vh - 5rem);
+    overflow: auto;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--fg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .stored {
+    display: grid;
+    gap: 0.5rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--line);
+  }
+  details {
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  summary {
+    padding: 0.65rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  pre {
+    margin: 0;
+    padding: 0 0.8rem 0.8rem;
+    overflow: auto;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--fg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .traces-panel {
+    padding-top: 2rem;
+  }
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+  }
+  .head .label {
+    margin: 0;
+    flex: 1;
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .chip {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-family: var(--font-pixel);
+    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+  }
+  .chip.on,
+  .chip:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+  }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .traces {
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .tr {
+    display: grid;
+    grid-template-columns: 7.2rem 6rem 1fr;
+    gap: 0.5rem 0.75rem;
+    padding: 0.45rem 0.55rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    font-size: 0.75rem;
+  }
+  .tr time,
+  .tr .scope {
+    font-family: var(--font-pixel);
+    font-size: 0.62rem;
+    color: var(--faint);
+    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+  }
+  .tr .scope {
+    color: var(--muted);
+  }
+  .tr.warn {
+    border-color: #5a4a10;
+  }
+  .tr.error {
+    border-color: var(--accent);
+  }
+  .tr.error .msg {
+    color: var(--accent);
+  }
+  .tr.warn .msg {
+    color: var(--warn);
+  }
+  .tr details {
+    grid-column: 1 / -1;
+    border: 0;
+    background: transparent;
+  }
+  .tr summary {
+    padding: 0;
+    font-size: 0.65rem;
+    color: var(--faint);
+  }
+  .tr pre {
+    padding: 0.35rem 0 0;
+    color: var(--muted);
+  }
+  .empty {
+    color: var(--faint);
+    font-size: 0.8rem;
+  }
+  @media (max-width: 720px) {
+    .panel,
+    .grid {
+      grid-template-columns: 1fr;
+      display: grid;
+    }
+    .tr {
+      grid-template-columns: 1fr 1fr;
+    }
+    .tr .msg {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

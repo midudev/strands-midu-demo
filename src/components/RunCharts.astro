@@ -1,0 +1,389 @@
+---
+import { fmtPace, seriesFromLaps, type RunLap, type SeriesPoint } from '../agent/coros/data'
+
+interface Props {
+  series: SeriesPoint[]
+  laps: RunLap[]
+  ritmo: string
+  fcMedia: number | null
+}
+
+const { series: raw, laps, ritmo, fcMedia } = Astro.props
+const series = raw.length > 1 ? raw : seriesFromLaps(laps)
+if (series.length < 2) return
+
+const W = 1000
+const H = 148
+const paces = series.map((p) => p.pace).filter((p) => p > 0)
+const hrs = series.map((p) => p.hr).filter((h): h is number => h != null)
+const maxKm = Math.max(series.at(-1)?.km ?? 0, 0.01)
+
+const band = (values: number[], floor: number, pad: number) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  const lo = sorted[Math.floor((sorted.length - 1) * 0.06)]
+  const hi = sorted[Math.floor((sorted.length - 1) * 0.94)]
+  const span = Math.max(hi - lo, floor)
+  const extra = Math.max(span * pad, floor * 0.25)
+  return { min: Math.max(0, lo - extra), max: hi + extra }
+}
+
+const paceBand = paces.length ? band(paces, 45, 0.18) : null
+const hrBand = hrs.length ? band(hrs, 20, 0.16) : null
+
+const xOf = (km: number) => (km / maxKm) * W
+const yOf = (v: number, min: number, max: number, invert = false) => {
+  const t = (v - min) / (max - min)
+  return (invert ? 1 - t : t) * H
+}
+
+const linePath = (pts: { x: number; y: number }[]) =>
+  pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
+
+const areaPath = (pts: { x: number; y: number }[]) =>
+  pts.length < 2 ? '' : `${linePath(pts)} L${pts.at(-1)!.x.toFixed(1)} ${H} L${pts[0].x.toFixed(1)} ${H} Z`
+
+const plot = (pick: (p: SeriesPoint) => number | null, range: { min: number; max: number }, invert = false) => {
+  const segs: { x: number; y: number }[][] = []
+  let cur: { x: number; y: number }[] = []
+  for (const p of series) {
+    const v = pick(p)
+    if (v == null || v <= 0) {
+      if (cur.length > 1) segs.push(cur)
+      cur = []
+      continue
+    }
+    const clamped = Math.min(range.max, Math.max(range.min, v))
+    cur.push({ x: xOf(p.km), y: yOf(clamped, range.min, range.max, invert) })
+  }
+  if (cur.length > 1) segs.push(cur)
+  return {
+    line: segs.map(linePath).join(' '),
+    area: segs.map(areaPath).join(' '),
+  }
+}
+
+const pacePlot = paceBand ? plot((p) => p.pace || null, paceBand) : null
+const hrPlot = hrBand ? plot((p) => p.hr, hrBand, true) : null
+if (!pacePlot && !hrPlot) return
+
+const ticks = (min: number, max: number, n = 3) => Array.from({ length: n }, (_, i) => min + ((max - min) * i) / (n - 1))
+const paceTicks = paceBand ? ticks(paceBand.min, paceBand.max) : []
+const hrTicks = hrBand ? ticks(hrBand.min, hrBand.max).reverse().map(Math.round) : []
+
+const kmStep = maxKm > 20 ? 5 : maxKm > 10 ? 2 : 1
+const kmTicks: number[] = []
+for (let k = 0; k < maxKm - kmStep * 0.15; k += kmStep) kmTicks.push(Number(k.toFixed(2)))
+kmTicks.push(maxKm)
+
+const charts = [
+  pacePlot && paceBand
+    ? { key: 'pace', label: 'Ritmo', color: 'var(--accent)', plot: pacePlot, ticks: paceTicks.map((v) => fmtPace(v)), unit: '/km' }
+    : null,
+  hrPlot && hrBand
+    ? { key: 'hr', label: 'Pulso', color: '#ff4b6e', plot: hrPlot, ticks: hrTicks.map(String), unit: 'bpm' }
+    : null,
+].filter((c): c is NonNullable<typeof c> => c !== null)
+---
+
+<section class="charts" id="run-charts" data-payload={JSON.stringify({ series, ritmo, fcMedia })}>
+  <div class="board">
+    {
+      charts.map((c, i) => (
+        <div class="chart" style={`--ink: ${c.color}`}>
+          <div class="meta">
+            <span>{c.label}</span>
+            {i === 0 && (
+              <p class="readout pixel" data-readout>
+                <span data-where>media</span>
+                <b data-pace>
+                  {ritmo}
+                  {ritmo !== '—' && <small>/km</small>}
+                </b>
+                <b data-hr>
+                  {fcMedia ?? '—'}
+                  {fcMedia != null && <small> bpm</small>}
+                </b>
+              </p>
+            )}
+          </div>
+          <div class="row">
+            <div class="y">
+              {c.ticks.map((t) => (
+                <span>{t}</span>
+              ))}
+            </div>
+            <div class="plot">
+              <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+                {c.ticks.map((_, i) => (
+                  <line class="grid" x1="0" y1={(H / (c.ticks.length - 1)) * i} x2={W} y2={(H / (c.ticks.length - 1)) * i} />
+                ))}
+                {kmTicks.map((k) => (
+                  <line class="vgrid" x1={xOf(k)} y1="0" x2={xOf(k)} y2={H} />
+                ))}
+                {c.plot.area && <path class="area" d={c.plot.area} />}
+                {c.plot.line && <path class="line" d={c.plot.line} />}
+              </svg>
+            </div>
+          </div>
+        </div>
+      ))
+    }
+    <div class="row axis">
+      <span></span>
+      <div class="km">
+        {kmTicks.map((k) => (
+          <span style={`left: ${(k / maxKm) * 100}%`}>{Math.abs(k - Math.round(k)) < 0.05 ? Math.round(k) : k.toFixed(1)}</span>
+        ))}
+      </div>
+    </div>
+    <div class="overlay" data-overlay>
+      <div class="cursor" data-cursor hidden></div>
+      <div class="tip pixel" data-tip hidden></div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const root = document.getElementById('run-charts')
+  if (root && !root.dataset.ready) {
+    root.dataset.ready = '1'
+    type Pt = { km: number; t: number; pace: number; hr: number | null }
+    const data = JSON.parse(root.dataset.payload || '{}') as { series: Pt[]; ritmo: string; fcMedia: number | null }
+    const series = data.series ?? []
+    const overlay = root.querySelector<HTMLElement>('[data-overlay]')
+    const cursor = root.querySelector<HTMLElement>('[data-cursor]')
+    const tip = root.querySelector<HTMLElement>('[data-tip]')
+    const where = root.querySelector<HTMLElement>('[data-where]')
+    const paceEl = root.querySelector<HTMLElement>('[data-pace]')
+    const hrEl = root.querySelector<HTMLElement>('[data-hr]')
+    if (!overlay || !cursor || !tip || !where || !paceEl || !hrEl || series.length < 2) {
+      /* sin datos */
+    } else {
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const fmtP = (secs: number) => {
+        if (!secs) return '—'
+        return `${Math.floor(secs / 60)}:${pad(Math.round(secs % 60))}`
+      }
+      const fmtT = (secs: number) => {
+        const h = Math.floor(secs / 3600)
+        const m = Math.floor((secs % 3600) / 60)
+        const s = Math.round(secs % 60)
+        return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+      }
+      const nearest = (km: number) => {
+        let lo = 0
+        let hi = series.length - 1
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1
+          if (series[mid].km < km) lo = mid + 1
+          else hi = mid
+        }
+        const a = series[Math.max(0, lo - 1)]
+        const b = series[lo]
+        return !a || Math.abs(b.km - km) < Math.abs(a.km - km) ? b : a
+      }
+      const reset = () => {
+        cursor.hidden = true
+        tip.hidden = true
+        where.textContent = 'media'
+        paceEl.innerHTML = `${data.ritmo}${data.ritmo !== '—' ? '<small>/km</small>' : ''}`
+        hrEl.innerHTML = `${data.fcMedia ?? '—'}${data.fcMedia != null ? '<small> bpm</small>' : ''}`
+      }
+      const show = (e: PointerEvent) => {
+        const r = overlay.getBoundingClientRect()
+        const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+        const maxKm = series.at(-1)?.km || 1
+        const pt = nearest(x * maxKm)
+        const left = `${(pt.km / maxKm) * 100}%`
+        cursor.hidden = false
+        cursor.style.left = left
+        tip.hidden = false
+        tip.style.left = left
+        tip.style.top = `${Math.min(Math.max(e.clientY - r.top, 28), r.height - 28)}px`
+        const flip = x > 0.72
+        tip.dataset.flip = flip ? '1' : ''
+        where.textContent = `${pt.km.toFixed(2)} km`
+        paceEl.innerHTML = `${fmtP(pt.pace)}${pt.pace ? '<small>/km</small>' : ''}`
+        hrEl.innerHTML = `${pt.hr ?? '—'}${pt.hr != null ? '<small> bpm</small>' : ''}`
+        tip.innerHTML = `<em>${pt.km.toFixed(2)} km · ${fmtT(pt.t)}</em><b>${fmtP(pt.pace)}<small>/km</small></b><b>${pt.hr ?? '—'}<small> bpm</small></b>`
+      }
+      overlay.addEventListener('pointermove', show)
+      overlay.addEventListener('pointerdown', show)
+      overlay.addEventListener('pointerleave', reset)
+    }
+  }
+</script>
+
+<style>
+  .charts {
+    padding: 2.5rem 0 0;
+    border-top: 1px solid var(--line);
+    margin-top: 2.5rem;
+  }
+  .readout {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    font-size: 1rem;
+    margin: 0;
+  }
+  .readout span {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--font-sans);
+  }
+  .readout small {
+    margin-left: 0.15rem;
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+  .board {
+    --y: 2.6rem;
+    --ygap: 0.45rem;
+    position: relative;
+    display: grid;
+    gap: 1.25rem 0;
+  }
+  .chart {
+    display: grid;
+    gap: 0.35rem;
+  }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-left: calc(var(--y) + var(--ygap));
+  }
+  .row {
+    display: grid;
+    grid-template-columns: var(--y) minmax(0, 1fr);
+    column-gap: var(--ygap);
+    align-items: stretch;
+  }
+  .y {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-size: 0.7rem;
+    color: var(--muted);
+    line-height: 1;
+    padding: 0.05rem 0;
+  }
+  .plot,
+  .chart svg {
+    min-width: 0;
+  }
+  .chart svg {
+    width: 100%;
+    height: 8.5rem;
+    display: block;
+  }
+  .grid,
+  .vgrid {
+    stroke: var(--line);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .vgrid {
+    opacity: 0.7;
+  }
+  .area {
+    fill: var(--ink);
+    opacity: 0.2;
+  }
+  .line {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .axis {
+    margin-top: -0.4rem;
+  }
+  .km {
+    position: relative;
+    height: 1.1rem;
+  }
+  .km span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: 0.65rem;
+    color: var(--faint);
+  }
+  .km span:first-child {
+    transform: none;
+  }
+  .km span:last-child {
+    transform: translateX(-100%);
+  }
+  .overlay {
+    position: absolute;
+    inset: 1.35rem 0 1.1rem calc(var(--y) + var(--ygap));
+    z-index: 2;
+    cursor: crosshair;
+  }
+  .cursor {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1px solid var(--fg);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  .tip {
+    position: absolute;
+    transform: translate(-8px, -110%);
+    min-width: 7.5rem;
+    padding: 0.55rem 0.7rem 0.6rem;
+    background: #161616;
+    border: 1px solid #333;
+    pointer-events: none;
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.95rem;
+    line-height: 1.15;
+  }
+  .tip[hidden] {
+    display: none;
+  }
+  .tip[data-flip='1'] {
+    transform: translate(calc(-100% + 8px), -110%);
+  }
+  .tip em {
+    font-style: normal;
+    font-family: var(--font-sans);
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tip small {
+    margin-left: 0.15rem;
+    font-size: 0.62rem;
+    color: var(--muted);
+  }
+  @media (max-width: 600px) {
+    .readout {
+      gap: 0.65rem;
+      font-size: 0.9rem;
+    }
+    .chart svg {
+      height: 7rem;
+    }
+    .overlay {
+      inset: 1.2rem 0 1.1rem calc(var(--y) + var(--ygap));
+    }
+  }
+</style>

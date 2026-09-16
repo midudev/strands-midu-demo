@@ -1,0 +1,318 @@
+---
+import type { Dashboard } from '../agent/coros/data'
+import { toSeconds, fmtTime, VALENCIA } from '../lib/running'
+
+interface Props {
+  data: Dashboard
+}
+const { data } = Astro.props
+const { fitness, recovery, load, runs } = data
+
+const OBJETIVO = '2:55:00'
+const media = fitness?.prediccion.media ?? null
+const maratonCoros = fitness?.prediccion.maraton ?? null
+const estimado = !maratonCoros && Boolean(media)
+const maraton =
+  maratonCoros ?? (media ? fmtTime(toSeconds(media) * Math.pow(42.195 / 21.0975, 1.06)) : null)
+const delta = maraton ? toSeconds(maraton) - toSeconds(OBJETIVO) : null
+const onTrack = delta !== null && delta <= 0
+const kmSemana = Math.round(runs.reduce((s, r) => s + r.km, 0) * 10) / 10
+const hoy = [...load].sort((a, b) => b.fecha.localeCompare(a.fecha))[0]
+const dias = Math.round((Date.parse(VALENCIA) - Date.now()) / 86400_000)
+const rec = recovery?.porcentaje
+const ratio = hoy?.ratio
+
+const trNivel = (s: string | null | undefined) => {
+  if (!s) return null
+  const k = s.toLowerCase()
+  if (k.includes('heavy')) return 'Puedes entrenar fuerte'
+  if (k.includes('moderate')) return 'Entrenamiento moderado'
+  if (k.includes('light')) return 'Entrenamiento suave'
+  if (k.includes('rest')) return 'Mejor descansar'
+  if (k.includes('recover')) return 'Recuperando'
+  return s
+}
+
+const trCarga = (s: string | null | undefined) => {
+  if (!s) return null
+  const k = s.toLowerCase()
+  if (k.includes('maintain')) return 'Manteniendo'
+  if (k.includes('product')) return 'Productiva'
+  if (k.includes('overreach')) return 'Sobrecarga'
+  if (k.includes('detrain')) return 'Bajando forma'
+  if (k.includes('optim')) return 'Optimizando'
+  if (k.includes('recover')) return 'Recuperando'
+  return s
+}
+
+const recTone = rec == null ? '' : rec >= 80 ? 'ok' : rec >= 50 ? 'warn' : 'hot'
+const loadTone = ratio == null ? '' : ratio >= 0.8 && ratio <= 1.3 ? 'ok' : 'warn'
+const estado = trCarga(hoy?.comentario) ?? trNivel(recovery?.nivel)
+
+const preds = [
+  { k: '5K', v: fitness?.prediccion['5K'] },
+  { k: '10K', v: fitness?.prediccion['10K'] },
+  { k: 'Media', v: media },
+  { k: 'Umbral', v: fitness?.umbral ? `${fitness.umbral}/km` : null },
+  { k: 'VO2max', v: fitness?.vo2max != null ? String(fitness.vo2max) : null },
+]
+---
+
+<section class="stats">
+  <div class="hero">
+    <div class="kicker">
+      <p class="label">{estimado ? 'Estimación maratón · desde la media' : 'Predicción maratón'}</p>
+      <p class="days">{dias} días para Valencia</p>
+    </div>
+
+    <div class="clocks">
+      <div class="clock">
+        <p class="pixel huge">{maraton ?? '--:--:--'}</p>
+        <p class="cap">{estimado ? 'Riegel desde la media' : 'Estimación actual'}</p>
+      </div>
+      <div class="clock goal">
+        <p class="pixel target">{OBJETIVO}</p>
+        <p class="cap">Objetivo 6 dic</p>
+      </div>
+    </div>
+
+    {
+      delta !== null && (
+        <p class:list={['delta', onTrack ? 'ok' : 'bad']}>
+          <i class:list={['tri', onTrack ? 'down' : 'up']} aria-hidden="true"></i>
+          <b class="pixel">{onTrack ? fmtTime(-delta) : fmtTime(delta)}</b>
+          {onTrack ? ' por debajo del objetivo' : ' por encima del objetivo'}
+        </p>
+      )
+    }
+  </div>
+
+  <ul class="preds">
+    {
+      preds.map((p) => (
+        <li>
+          <span>{p.k}</span>
+          <b class="pixel">{p.v ?? '—'}</b>
+        </li>
+      ))
+    }
+  </ul>
+
+  <div class="meters">
+    <article>
+      <p class="label">Recuperación</p>
+      <p class="pixel val">
+        {rec ?? '—'}
+        {rec != null && <small>%</small>}
+      </p>
+      <div class:list={['bar', recTone]}>
+        <i style={`width: ${rec ?? 0}%`}></i>
+      </div>
+      <p class="note">{trNivel(recovery?.nivel) ?? (rec == null ? 'Sin dato de COROS' : `${rec}% listo`)}</p>
+    </article>
+    <article>
+      <p class="label">Carga</p>
+      <p class="pixel val">{ratio != null ? ratio.toFixed(2) : '—'}</p>
+      <div class:list={['bar', loadTone]}>
+        <i style={`width: ${ratio != null ? Math.min(100, (ratio / 1.6) * 100) : 0}%`}></i>
+      </div>
+      <p class="note">{estado ?? (ratio == null ? 'Sin dato de COROS' : `Ratio ${ratio.toFixed(2)}`)}</p>
+    </article>
+    <article>
+      <p class="label">Km · 7 días</p>
+      <p class="pixel val">
+        {runs.length || kmSemana ? kmSemana.toFixed(1) : '—'}
+        {(runs.length || kmSemana) ? <small>km</small> : ''}
+      </p>
+      <div class="bar">
+        <i style={`width: ${Math.min(100, (kmSemana / 80) * 100)}%`}></i>
+      </div>
+      <p class="note">{runs.length ? `${runs.length} salidas esta semana` : 'Sin carreras esta semana'}</p>
+    </article>
+  </div>
+</section>
+
+<style>
+  .stats {
+    display: grid;
+    gap: 0;
+    padding: 1.5rem 0 0;
+  }
+  .hero {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem 1.1rem 1.15rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+  }
+  .kicker {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  .kicker .label {
+    margin: 0;
+  }
+  .days {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .clocks {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 2rem 3rem;
+  }
+  .clock {
+    min-width: 0;
+  }
+  .huge {
+    margin: 0;
+    font-size: clamp(2.6rem, 7.2vw, 5.2rem);
+    line-height: 0.92;
+    letter-spacing: -0.03em;
+    text-shadow: 0 0 48px rgb(255 107 0 / 0.18);
+  }
+  .target {
+    margin: 0;
+    font-size: clamp(1.6rem, 4vw, 2.6rem);
+    line-height: 1;
+    color: var(--muted);
+  }
+  .cap {
+    margin: 0.7rem 0 0;
+    font-size: 0.75rem;
+    color: var(--faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .delta {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+  }
+  .delta b {
+    font-size: 1.05rem;
+  }
+  .tri {
+    width: 0;
+    height: 0;
+    flex-shrink: 0;
+  }
+  .tri.down {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid var(--ok);
+  }
+  .tri.up {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 7px solid #ff4b6e;
+  }
+  .delta.ok,
+  .delta.ok b {
+    color: var(--ok);
+  }
+  .delta.bad,
+  .delta.bad b {
+    color: #ff4b6e;
+  }
+  .preds {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+  .preds li {
+    display: grid;
+    gap: 0.4rem;
+    padding: 0.85rem 0.95rem 1rem;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .preds span {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .preds b {
+    font-size: clamp(1.15rem, 2.4vw, 1.55rem);
+    font-weight: 500;
+    line-height: 1;
+  }
+  .meters {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-left: 1px solid var(--line);
+  }
+  .meters article {
+    padding: 1rem 0.95rem 1.15rem;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .meters .label {
+    margin: 0 0 0.65rem;
+  }
+  .val {
+    margin: 0;
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    line-height: 1;
+  }
+  .val small {
+    margin-left: 0.2rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .bar {
+    height: 4px;
+    margin: 0.9rem 0 0.7rem;
+    background: var(--line);
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--fg);
+    min-width: 0;
+  }
+  .bar.ok i {
+    background: var(--ok);
+  }
+  .bar.warn i {
+    background: var(--warn);
+  }
+  .bar.hot i {
+    background: var(--accent);
+  }
+  .note {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  @media (max-width: 720px) {
+    .preds {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .meters {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 480px) {
+    .clocks {
+      gap: 1.25rem;
+    }
+    .preds {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

@@ -1,0 +1,526 @@
+---
+// Slides del taller (Nerdearla · stand de AWS): qué es Strands Agents SDK y cómo está montado midu.run.
+// Navegación por teclado: ← → espacio, Home/End, F pantalla completa, Esc vuelve a la web. La slide actual va en el hash (#3).
+import { Code } from 'astro:components'
+import Layout from '../layouts/Layout.astro'
+import Diagram from '../components/slides/Diagram.astro'
+
+export const prerender = true
+
+const THEME = 'vesper'
+
+const agentCode = `import { Agent } from '@strands-agents/sdk'
+import { OpenAIModel } from '@strands-agents/sdk/models/openai'
+
+const coach = new Agent({
+  model: new OpenAIModel({ modelId: 'gpt-5.6-luna' }),
+  systemPrompt: 'Eres el coach de running de midu…',
+  tools: [getUpcomingRaces, corosClient()],
+})
+
+const result = await coach.invoke('¿Qué entreno hoy?')`
+
+const toolCode = `import { tool, McpClient } from '@strands-agents/sdk'
+import { z } from 'zod'
+
+// Tool local: una función con schema
+export const getUpcomingRaces = tool({
+  name: 'get_upcoming_races',
+  description: 'Próximas carreras en Catalunya (xipgroc.cat)',
+  inputSchema: z.object({ limit: z.number().default(20) }),
+  callback: async ({ limit }) => {
+    const { races } = await getRaces()
+    return races.slice(0, limit)
+  },
+})
+
+// Tool remota: un servidor MCP entero (OAuth incluido)
+const coros = new McpClient({
+  url: COROS_MCP_URL,
+  authProvider: new FileOAuthProvider(),
+})`
+
+const hookCode = `agent.addHook(BeforeToolCallEvent, (event) => {
+  if (event.toolUse.name !== 'save_race_prediction') return
+
+  const p = event.toolUse.input
+  const reloj = corosBaseline(p.distanciaKm)
+  if (toSeconds(p.tiempoEstimado) < reloj * 0.98) {
+    // El modelo recibe esto como resultado y corrige
+    event.cancel = 'No seas más optimista que el reloj.'
+  }
+})
+
+agent.addHook(AfterToolCallEvent, (event) => {
+  trace('tool', event.toolUse.name, event.result.status)
+})`
+
+const memoryCode = `const coach = new Agent({
+  model,
+  tools: [...],
+  // 1. Contexto: qué mensajes ve el modelo
+  conversationManager: new SlidingWindowConversationManager({
+    windowSize: 12, // o SummarizingConversationManager
+  }),
+  // 2. Sesión: snapshot en disco tras cada turno
+  sessionManager: new SessionManager({
+    sessionId: 'coach-chat',
+    storage: new LocalFileStorage('data/strands'),
+  }),
+  // 3. Memoria: hechos duraderos, inyectados si toca
+  memoryManager: new MemoryManager({
+    stores: [new FileMemoryStore({ storage })],
+  }),
+})
+
+// 4. Estado fuera del contexto
+coach.appState.set('turnos', 1)`
+
+const teamCode = `const fisio = new Agent({
+  name: 'fisio',
+  systemPrompt: FISIO_PROMPT,
+  tools: [coros],
+})
+const nutri = new Agent({ name: 'nutricionista' /* … */ })
+
+const entrenador = new Agent({
+  systemPrompt: HEAD_COACH_PROMPT,
+  tools: [
+    coros,
+    fisio.asTool({ description: 'Sueño, molestias…' }),
+    nutri.asTool({ description: 'Geles, hidratación…' }),
+  ],
+})`
+
+const swarmCode = `import { Swarm } from '@strands-agents/sdk/multiagent'
+
+const prediccion = new Swarm({
+  nodes: [analista, optimista, conservador, arbitro],
+  start: 'analista',
+  maxSteps: 8,
+})
+
+// Cada agente decide a quién pasa el testigo: { agentId, message, context }
+await prediccion.invoke(\`Predice cómo haría midu la \${race.nombre}\`)`
+
+const structuredCode = `const Briefing = z.object({
+  semaforo: z.enum(['verde', 'ambar', 'rojo']),
+  titular: z.string(),
+  sesion: z.object({ bloques: z.array(BloqueSesion) }),
+  semana: z.array(DiaPlan),
+})
+
+const result = await coach.invoke('Briefing de hoy', {
+  structuredOutputSchema: Briefing,
+})
+
+result.structuredOutput // tipado y validado`
+---
+
+<Layout title="Strands Agents SDK · taller midu.run" description="Slides del taller de Strands Agents SDK en Nerdearla con AWS">
+  <div class="deck" id="deck">
+    <header class="bar">
+      <a href="/" class="pixel brand">midu.run<span>/slides</span></a>
+      <p class="pixel hint">← → navegar · F pantalla completa · Esc volver</p>
+      <p class="pixel counter"><span id="current">1</span> / <span id="total">1</span></p>
+    </header>
+
+    <!-- 1. Portada -->
+    <section class="slide cover" data-title="Portada">
+      <p class="pixel kicker">Nerdearla · stand de AWS · taller de 30 min</p>
+      <h1 class="pixel">
+        Agentes de IA<br />con <span class="accent">Strands</span><br />Agents SDK
+      </h1>
+      <p class="lead">Cómo está montado midu.run: un coach de running que lee mi COROS y me dice qué entrenar hoy.</p>
+      <p class="pixel by">
+        @midudev <span class="sep">·</span> <img src="/aws.png" alt="AWS" width="40" height="40" />
+      </p>
+    </section>
+
+    <!-- 2. Qué es -->
+    <section class="slide" data-title="Qué es Strands">
+      <p class="label">01 · Qué es</p>
+      <h2 class="pixel">Un agente es <span class="accent">modelo + prompt + tools</span>. Strands se encarga del resto.</h2>
+      <div class="cols">
+        <ul class="points">
+          <li><b>Open source de AWS.</b> TypeScript y Python. Apache 2.0.</li>
+          <li><b>Model-driven.</b> El modelo decide qué tool llamar y cuándo parar. Tú no escribes el bucle.</li>
+          <li><b>Cualquier modelo.</b> Bedrock, OpenAI, Anthropic, Gemini, Ollama…</li>
+          <li><b>Baterías incluidas.</b> MCP, hooks, sesiones, memoria, multi-agente, structured output.</li>
+        </ul>
+        <Code code={agentCode} lang="ts" theme={THEME} />
+      </div>
+    </section>
+
+    <!-- 3. Agent loop -->
+    <section class="slide" data-title="El loop del agente">
+      <p class="label">02 · El loop del agente</p>
+      <h2 class="pixel">Un <span class="accent">invoke()</span> son N vueltas: el modelo pide tools hasta que tiene la respuesta.</h2>
+      <Diagram kind="loop" />
+      <p class="foot">En midu.run "¿qué entreno hoy?" dispara 3 o 4 llamadas a COROS antes de contestar. Todo dentro de un invoke.</p>
+    </section>
+
+    <!-- 4. Tools + MCP -->
+    <section class="slide" data-title="Tools y MCP">
+      <p class="label">03 · Tools y MCP</p>
+      <h2 class="pixel">Una tool es una función con schema. Un <span class="accent">McpClient</span> es una caja de tools ajenas.</h2>
+      <div class="cols wide">
+        <Code code={toolCode} lang="ts" theme={THEME} />
+        <Diagram kind="tools" />
+      </div>
+    </section>
+
+    <!-- 5. Hooks / guardrails -->
+    <section class="slide" data-title="Hooks">
+      <p class="label">04 · Hooks</p>
+      <h2 class="pixel">Los hooks se cuelgan del loop: <span class="accent">guardrails</span>, trazas, inputs corregidos.</h2>
+      <div class="cols wide">
+        <Code code={hookCode} lang="ts" theme={THEME} />
+        <Diagram kind="hooks" />
+      </div>
+    </section>
+
+    <!-- 6. Memoria -->
+    <section class="slide" data-title="Contexto, sesión y memoria">
+      <p class="label">05 · Contexto, sesión y memoria</p>
+      <h2 class="pixel">Tres capas distintas para tres problemas distintos. <span class="accent">No las mezcles.</span></h2>
+      <div class="cols wide code-right">
+        <Diagram kind="memory" />
+        <Code code={memoryCode} lang="ts" theme={THEME} />
+      </div>
+    </section>
+
+    <!-- 7. Agent as tool -->
+    <section class="slide" data-title="Agent as tool">
+      <p class="label">06 · Multi-agente I</p>
+      <h2 class="pixel">Agent as tool: el entrenador tiene un <span class="accent">equipo</span> y lo consulta cuando hace falta.</h2>
+      <div class="cols wide code-right">
+        <Diagram kind="team" />
+        <Code code={teamCode} lang="ts" theme={THEME} />
+      </div>
+    </section>
+
+    <!-- 8. Swarm -->
+    <section class="slide" data-title="Swarm">
+      <p class="label">07 · Multi-agente II</p>
+      <h2 class="pixel">Swarm: los agentes se pasan el <span class="accent">testigo</span> hasta llegar a una decisión.</h2>
+      <Diagram kind="swarm" />
+      <Code code={swarmCode} lang="ts" theme={THEME} />
+    </section>
+
+    <!-- 9. Structured output -->
+    <section class="slide" data-title="Structured output">
+      <p class="label">08 · Structured output</p>
+      <h2 class="pixel">Cuando la respuesta va a la UI, pide un <span class="accent">objeto</span>, no un texto.</h2>
+      <div class="cols">
+        <Code code={structuredCode} lang="ts" theme={THEME} />
+        <ul class="points">
+          <li><b>Schema de Zod.</b> El mismo tipo en el agente y en el componente Astro.</li>
+          <li><b>Validado por el SDK.</b> Si el modelo se equivoca, reintenta antes de devolverte nada.</li>
+          <li><b>En midu.run:</b> el briefing diario (semáforo, sesión por bloques, plan semanal) y las predicciones de carrera.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 10. Cierre -->
+    <section class="slide cover" data-title="Cierre">
+      <p class="pixel kicker">Ahora en vivo</p>
+      <h1 class="pixel">Vamos a ver<br />al coach <span class="accent">trabajar</span>.</h1>
+      <ul class="links pixel">
+        <li><a href="https://strandsagents.com" target="_blank" rel="noopener">strandsagents.com</a></li>
+        <li><a href="https://github.com/strands-agents/sdk-typescript" target="_blank" rel="noopener">github.com/strands-agents/sdk-typescript</a></li>
+        <li><a href="/">midu.run</a></li>
+      </ul>
+      <p class="pixel by">
+        @midudev <span class="sep">·</span> <img src="/aws.png" alt="AWS" width="40" height="40" />
+      </p>
+    </section>
+
+    <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+  </div>
+</Layout>
+
+<script>
+  const deck = document.getElementById('deck')!
+  const slides = [...deck.querySelectorAll<HTMLElement>('.slide')]
+  const current = document.getElementById('current')!
+  const total = document.getElementById('total')!
+  const progress = document.getElementById('progress')!
+  total.textContent = String(slides.length)
+
+  let index = 0
+
+  function show(i: number, push = true) {
+    index = Math.max(0, Math.min(slides.length - 1, i))
+    slides.forEach((s, n) => {
+      s.toggleAttribute('hidden', n !== index)
+      s.classList.toggle('active', n === index)
+    })
+    current.textContent = String(index + 1)
+    progress.style.width = `${((index + 1) / slides.length) * 100}%`
+    document.title = `${index + 1}/${slides.length} · ${slides[index].dataset.title} · Strands`
+    if (push) history.replaceState(null, '', `#${index + 1}`)
+  }
+
+  const fromHash = () => show(Math.max(1, parseInt(location.hash.slice(1) || '1', 10) || 1) - 1, false)
+  fromHash()
+  addEventListener('hashchange', fromHash)
+
+  addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+      case 'PageDown':
+      case ' ':
+      case 'Enter':
+      case 'j':
+      case 'l':
+        e.preventDefault()
+        show(index + 1)
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+      case 'PageUp':
+      case 'Backspace':
+      case 'k':
+      case 'h':
+        e.preventDefault()
+        show(index - 1)
+        break
+      case 'Home':
+        show(0)
+        break
+      case 'End':
+        show(slides.length - 1)
+        break
+      case 'f':
+      case 'F':
+        document.fullscreenElement ? document.exitFullscreen() : deck.requestFullscreen?.()
+        break
+      case 'Escape':
+        if (!document.fullscreenElement) location.href = '/'
+        break
+    }
+  })
+
+  // Tap/click: mitad derecha avanza, mitad izquierda retrocede (para el mando o el móvil)
+  deck.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('a, button, pre')) return
+    show(e.clientX > innerWidth / 2 ? index + 1 : index - 1)
+  })
+</script>
+
+<style>
+  .deck {
+    position: relative;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    /* rejilla sutil, como papel milimetrado */
+    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center;
+    user-select: none;
+  }
+  .deck:fullscreen {
+    background-color: var(--bg);
+  }
+  .bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+    font-size: 0.75rem;
+  }
+  .brand {
+    text-decoration: none;
+    font-size: 1rem;
+  }
+  .brand span {
+    color: var(--accent);
+  }
+  .hint,
+  .counter {
+    margin: 0;
+    color: var(--faint);
+    font-size: 0.65rem;
+  }
+  .counter {
+    color: var(--muted);
+    min-width: 4ch;
+    text-align: right;
+  }
+
+  .slide {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(1rem, 2.5vh, 2rem);
+    width: min(100%, 78rem);
+    margin: 0 auto;
+    padding: clamp(1.5rem, 4vh, 3rem) clamp(1rem, 4vw, 3rem) clamp(2rem, 5vh, 3.5rem);
+    animation: in 0.25s ease-out;
+  }
+  .slide[hidden] {
+    display: none;
+  }
+  @keyframes in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .slide :global(.label) {
+    margin: 0;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.6rem, 7vw, 6rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    margin: 0;
+    font-size: clamp(1.4rem, 3.2vw, 2.6rem);
+    line-height: 1.15;
+    max-width: 28ch;
+  }
+  .accent {
+    color: var(--accent);
+  }
+
+  .cover {
+    gap: clamp(1.25rem, 3vh, 2.5rem);
+  }
+  .kicker {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+  }
+  .lead {
+    margin: 0;
+    max-width: 44ch;
+    font-size: clamp(1rem, 1.8vw, 1.35rem);
+    color: var(--muted);
+  }
+  .by {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1rem;
+    color: var(--fg);
+  }
+  .by .sep {
+    color: var(--faint);
+  }
+  .by img {
+    height: 2.4em;
+    width: auto;
+    margin-block: -0.8em;
+    transform: translateY(0.25em);
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: clamp(1.25rem, 3vw, 3rem);
+    align-items: center;
+  }
+  .cols.wide {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+  .cols.wide.code-right {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+  .points {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.9rem;
+    font-size: clamp(0.95rem, 1.5vw, 1.2rem);
+    color: var(--muted);
+  }
+  .points b {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .foot {
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+    max-width: 70ch;
+  }
+
+  .slide :global(pre) {
+    margin: 0;
+    padding: 1.1rem 1.25rem;
+    border: 1px solid var(--line);
+    background: var(--bg-2) !important;
+    font-size: clamp(0.7rem, 0.95vw, 0.9rem);
+    line-height: 1.55;
+    overflow-x: auto;
+    user-select: text;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+
+  .links {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.6rem;
+    font-size: clamp(0.9rem, 1.6vw, 1.3rem);
+  }
+  .links a {
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .links a:hover {
+    color: var(--accent);
+  }
+
+  .progress {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--line);
+  }
+  .progress i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width 0.25s ease-out;
+  }
+
+  @media (max-width: 860px) {
+    .cols,
+    .cols.wide {
+      grid-template-columns: 1fr;
+    }
+    .hint {
+      display: none;
+    }
+    .slide {
+      justify-content: flex-start;
+    }
+  }
+</style>

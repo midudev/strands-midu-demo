@@ -1,0 +1,125 @@
+---
+import type { Run } from '../agent/coros/data'
+
+interface Props {
+  runs: Run[]
+}
+const { runs } = Astro.props
+const fmt = new Intl.DateTimeFormat('es', { weekday: 'short', day: 'numeric' })
+---
+
+<section class="runs">
+  <p class="label">Últimos 7 días</p>
+  {
+    runs.length === 0 ? (
+      <p class="empty">Sin carreras registradas esta semana.</p>
+    ) : (
+      <ol>
+        {runs.map((r) => (
+          <li>
+            <a href={`/runs/${r.id}`}>
+              <span class="pixel day">{fmt.format(new Date(`${r.fecha}T12:00:00`))}</span>
+              <span class="name">
+                {r.nombre}
+                {r.lugar && <small> · {r.lugar}</small>}
+              </span>
+              <span class="pixel km">{r.km.toFixed(1)}<small> km</small></span>
+              <span class="pixel pace">{r.ritmo}<small>/km</small></span>
+              <span class="pixel hr">{r.fcMedia ?? '--'}<small> bpm</small></span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    )
+  }
+</section>
+
+<style>
+  .runs {
+    padding: 2.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  li {
+    border-bottom: 1px solid var(--line);
+  }
+  a {
+    display: grid;
+    grid-template-columns: 4.5rem 1fr 5rem 5rem 5rem 0.85rem;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.75rem 0.85rem;
+    margin: 0 -0.85rem;
+    text-decoration: none;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+  }
+  a::after {
+    content: '→';
+    color: var(--accent);
+    font-size: 0.9rem;
+    line-height: 1;
+    opacity: 0;
+    transform: translateX(-0.35rem);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  a:hover,
+  a:focus-visible {
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  a:hover::after,
+  a:focus-visible::after {
+    opacity: 1;
+    transform: none;
+  }
+  a:hover .day,
+  a:focus-visible .day {
+    color: var(--accent);
+  }
+  a:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .day {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    transition: color 0.15s ease;
+  }
+  .name small {
+    color: var(--muted);
+  }
+  .km,
+  .pace,
+  .hr {
+    text-align: right;
+    font-size: 1rem;
+  }
+  li small {
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+  .empty {
+    color: var(--muted);
+  }
+  @media (max-width: 600px) {
+    a {
+      grid-template-columns: 4rem 1fr 4.5rem 0.85rem;
+    }
+    .hr,
+    .pace {
+      display: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    a,
+    a::after,
+    .day {
+      transition: none;
+    }
+  }
+</style>

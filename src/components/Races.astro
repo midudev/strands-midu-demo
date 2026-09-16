@@ -1,0 +1,594 @@
+---
+import type { Race } from '../lib/races'
+import type { StoredPrediction, SwarmStep } from '../lib/predictions'
+import { SWARM_AGENTS } from '../agent/prompts/swarm'
+
+interface Props {
+  races: Race[]
+  predictions: Record<string, StoredPrediction>
+  connected: boolean
+  fetchedAt: string | null
+}
+const { races, predictions, connected, fetchedAt } = Astro.props
+const fmt = new Intl.DateTimeFormat('es', { weekday: 'short', day: 'numeric', month: 'short' })
+const REC: Record<string, string> = { competir: 'Competir', tempo: 'Tempo', social: 'Social', evitar: 'Evitar' }
+const NAMES = Object.fromEntries(SWARM_AGENTS.map((a) => [a.id, a.nombre]))
+const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`)
+const ctxVal = (v: unknown) => {
+  const t = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)
+  return t.length > 140 ? `${t.slice(0, 140)}…` : t
+}
+const totalMs = (steps: SwarmStep[]) => steps.reduce((n, s) => n + s.ms, 0)
+---
+
+<section class="races" id="races" data-connected={String(connected)} data-agents={JSON.stringify(SWARM_AGENTS.map((a) => ({ id: a.id, nombre: a.nombre, descripcion: a.descripcion })))}>
+  <div class="head">
+    <p class="label">Próximas carreras</p>
+    {fetchedAt && <span class="pixel updated">Actualizado {new Date(fetchedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+  </div>
+  <p class="intro">
+    Cada predicción la decide un <b>enjambre</b> de cuatro agentes que se pasan el testigo: analista, optimista, conservador y árbitro.
+    Verás en vivo quién actúa, qué consulta y qué le dice al siguiente.
+  </p>
+
+  {races.length === 0 && <p class="empty">No se han podido cargar carreras. <a href="/api/races?refresh">Reintentar</a></p>}
+
+  <ol>
+    {
+      races.map((r) => {
+        const p = predictions[r.id]
+        return (
+          <li class="race" data-race-id={r.id}>
+            <div class="when">
+              <span class="pixel date">{fmt.format(new Date(`${r.fecha}T12:00:00`))}</span>
+              {r.liga && <span class="pixel liga">Lliga</span>}
+            </div>
+            <div class="info">
+              <h3>{r.url ? <a href={r.url} target="_blank" rel="noopener">{r.nombre}</a> : r.nombre}</h3>
+              <p class="pixel dist">
+                {r.distancias.length ? r.distancias.join(' · ') : 'distancia sin detallar'}
+                {r.inscripcionesAbiertas ? ' · inscripciones abiertas' : ''}
+              </p>
+              <div class="prediction" data-state={p ? 'ready' : 'idle'}>
+                {p && (
+                  <Fragment>
+                    <p class="pixel time">
+                      {p.tiempoEstimado}
+                      <small> · {p.ritmoEstimado}/km · {p.distancia}</small>
+                    </p>
+                    <p class="reco">
+                      <b class:list={['pixel', 'tag', p.recomendacion]}>{REC[p.recomendacion]}</b> {p.motivo}
+                    </p>
+                    <p class="claves">{p.claves.join(' · ')}</p>
+                    <p class="pixel tools">
+                      CONFIANZA {p.confianza.toUpperCase()}
+                      {p.toolsUsadas?.length ? ` · TOOLS ${p.toolsUsadas.join(' · ')}` : ''}
+                    </p>
+                    {p.swarm?.length ? (
+                      <details class="swarm-log">
+                        <summary class="pixel">Cómo lo decidió el enjambre · {p.swarm.length} pasos · {fmtMs(totalMs(p.swarm))}</summary>
+                        <ol class="steps">
+                          {p.swarm.map((s) => (
+                            <li class="step done">
+                              <div class="step-head">
+                                <span class="pixel who">{NAMES[s.agente] ?? s.agente}</span>
+                                <span class="pixel ms">{fmtMs(s.ms)}</span>
+                              </div>
+                              {s.tools.length > 0 && <p class="pixel step-tools">{s.tools.join(' · ')}</p>}
+                              <p class="msg">{s.mensaje}</p>
+                              {s.contexto && (
+                                <ul class="ctx">
+                                  {Object.entries(s.contexto).map(([k, v]) => (
+                                    <li><span class="pixel k">{k}</span> {ctxVal(v)}</li>
+                                  ))}
+                                </ul>
+                              )}
+                              <p class="pixel next">{s.siguiente ? `→ ${NAMES[s.siguiente] ?? s.siguiente}` : '■ fin'}</p>
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    ) : null}
+                  </Fragment>
+                )}
+              </div>
+            </div>
+            <div class="action">
+              <button class="btn ghost predict" type="button" disabled={!connected} title={connected ? '' : 'Conecta COROS para predecir'}>
+                {p ? 'Repredecir' : 'Predecir'}
+              </button>
+            </div>
+          </li>
+        )
+      })
+    }
+  </ol>
+</section>
+
+<script>
+  type AgentDef = { id: string; nombre: string; descripcion: string }
+  const REC: Record<string, string> = { competir: 'Competir', tempo: 'Tempo', social: 'Social', evitar: 'Evitar' }
+  const TOOLS: Record<string, string> = {
+    queryTrainingLoadAssessment: 'Carga',
+    queryRecoveryStatus: 'Recuperación',
+    querySportRecords: 'Entrenamientos',
+    getActivityDetail: 'Detalle sesión',
+    queryActivityLapData: 'Vueltas',
+    queryFitnessAssessmentOverview: 'Fitness',
+    querySleepData: 'Sueño',
+    get_upcoming_races: 'Carrera',
+    save_race_prediction: 'Guardar predicción',
+  }
+  const root = document.getElementById('races')!
+  const AGENTS: AgentDef[] = JSON.parse(root.dataset.agents ?? '[]')
+  const NAMES = Object.fromEntries(AGENTS.map((a) => [a.id, a.nombre]))
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`)
+  const ctxVal = (v: unknown) => {
+    const t = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)
+    return t.length > 140 ? `${t.slice(0, 140)}…` : t
+  }
+
+  const el = (tag: string, cls?: string, text?: string) => {
+    const e = document.createElement(tag)
+    if (cls) e.className = cls
+    if (text !== undefined) e.textContent = text
+    return e
+  }
+
+  // Panel del enjambre: fila de agentes (quién tiene el testigo) + lista de pasos en vivo
+  function swarmPanel() {
+    const panel = el('div', 'swarm')
+    const nodes = el('ol', 'nodes')
+    for (const a of AGENTS) {
+      const li = el('li', 'node idle')
+      li.dataset.node = a.id
+      li.title = a.descripcion
+      li.append(el('i', 'dot'), el('span', 'pixel', a.nombre))
+      nodes.append(li)
+    }
+    const steps = el('ol', 'steps')
+    panel.append(nodes, steps)
+    return { panel, nodes, steps }
+  }
+
+  function predictionHtml(p: any) {
+    return `
+      <p class="pixel time">${esc(p.tiempoEstimado)}<small> · ${esc(p.ritmoEstimado)}/km · ${esc(p.distancia)}</small></p>
+      <p class="reco"><b class="pixel tag ${esc(p.recomendacion)}">${REC[p.recomendacion] ?? esc(p.recomendacion)}</b> ${esc(p.motivo)}</p>
+      <p class="claves">${p.claves.map(esc).join(' · ')}</p>
+      <p class="pixel tools">CONFIANZA ${esc(p.confianza).toUpperCase()}${p.toolsUsadas?.length ? ` · TOOLS ${p.toolsUsadas.map(esc).join(' · ')}` : ''}</p>`
+  }
+
+  document.querySelectorAll<HTMLLIElement>('.race').forEach((li) => {
+    const btn = li.querySelector<HTMLButtonElement>('.predict')!
+    const box = li.querySelector<HTMLElement>('.prediction')!
+    btn.addEventListener('click', async () => {
+      btn.disabled = true
+      btn.textContent = 'Enjambre en marcha…'
+      box.dataset.state = 'loading'
+      box.innerHTML = ''
+      const { panel, nodes, steps } = swarmPanel()
+      box.append(panel)
+      const current = new Map<string, HTMLElement>() // nodeId → step card en curso
+      const toolEls = new Map<string, HTMLElement>()
+      let totalMs = 0
+      let t0 = Date.now()
+
+      const setNode = (id: string, state: 'idle' | 'active' | 'done') => {
+        const n = nodes.querySelector<HTMLElement>(`[data-node="${CSS.escape(id)}"]`)
+        if (n) n.className = `node ${state}`
+      }
+
+      try {
+        const res = await fetch('/api/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raceId: li.dataset.raceId }),
+        })
+        if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let result: any = null
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.trim()) continue
+            const c = JSON.parse(line)
+            if (c.type === 'node_start') {
+              t0 = Date.now()
+              nodes.querySelectorAll('.node.active').forEach((n) => (n.className = 'node done'))
+              setNode(c.node, 'active')
+              const card = el('li', 'step running')
+              const head = el('div', 'step-head')
+              head.append(el('span', 'pixel who', `${c.step}. ${NAMES[c.node] ?? c.node}`), el('span', 'pixel ms', 'pensando…'))
+              card.append(head, el('ul', 'tool-row'))
+              steps.append(card)
+              current.set(c.node, card)
+              btn.textContent = `${NAMES[c.node] ?? c.node}…`
+            } else if (c.type === 'tool_start') {
+              const row = current.get(c.node)?.querySelector('.tool-row')
+              if (!row) continue
+              const t = el('li', 'chip running', TOOLS[c.name] ?? c.name)
+              row.append(t)
+              toolEls.set(c.id, t)
+            } else if (c.type === 'tool_end') {
+              const t = toolEls.get(c.id)
+              if (!t) continue
+              t.className = `chip ${c.ok ? 'done' : 'fail'}`
+              t.textContent = `${TOOLS[c.name] ?? c.name} · ${fmtMs(c.ms)}`
+            } else if (c.type === 'handoff') {
+              const card = current.get(c.from)
+              if (!card) continue
+              totalMs += c.ms
+              card.className = 'step done'
+              const ms = card.querySelector('.ms')
+              if (ms) ms.textContent = fmtMs(c.ms)
+              card.append(el('p', 'msg', c.message))
+              if (c.context && Object.keys(c.context).length) {
+                const ul = el('ul', 'ctx')
+                for (const [k, v] of Object.entries(c.context)) {
+                  const item = el('li')
+                  item.append(el('span', 'pixel k', k), document.createTextNode(` ${ctxVal(v)}`))
+                  ul.append(item)
+                }
+                card.append(ul)
+              }
+              card.append(el('p', 'pixel next', c.to ? `→ ${NAMES[c.to] ?? c.to}` : '■ fin'))
+              setNode(c.from, 'done')
+              current.delete(c.from)
+            } else if (c.type === 'result') {
+              result = c.prediction
+            } else if (c.type === 'error') {
+              throw new Error(c.message)
+            }
+          }
+        }
+        if (!result) throw new Error('El enjambre terminó sin predicción')
+        // Resultado arriba; el recorrido del enjambre queda plegado debajo
+        const details = el('details', 'swarm-log')
+        details.open = true
+        details.append(el('summary', 'pixel', `Cómo lo decidió el enjambre · ${steps.children.length} pasos · ${fmtMs(totalMs)}`), steps)
+        box.innerHTML = predictionHtml(result)
+        box.append(details)
+        box.dataset.state = 'ready'
+        btn.textContent = 'Repredecir'
+      } catch (err) {
+        const e = el('p', 'error', (err as Error).message)
+        box.append(e)
+        box.dataset.state = 'error'
+        btn.textContent = 'Reintentar'
+      } finally {
+        btn.disabled = false
+      }
+    })
+  })
+</script>
+
+<style>
+  .races {
+    padding: 2.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  .intro {
+    margin: -0.25rem 0 1rem;
+    max-width: 44rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .intro b {
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .updated {
+    font-size: 0.65rem;
+    color: var(--faint);
+  }
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .race {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr auto;
+    gap: 1.25rem;
+    padding: 1.25rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .when {
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+  }
+  .info {
+    min-width: 0;
+  }
+  .date {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+  }
+  .liga {
+    font-size: 0.6rem;
+    color: var(--accent);
+  }
+  h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  h3 a {
+    text-decoration: none;
+  }
+  h3 a:hover {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+  }
+  .dist {
+    margin: 0.25rem 0 0;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .prediction[data-state='idle'] {
+    display: none;
+  }
+  .prediction {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-2);
+    border-left: 2px solid var(--accent);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .prediction :global(p) {
+    margin: 0 0 0.5rem;
+  }
+  .prediction :global(p:last-child) {
+    margin: 0;
+  }
+  .prediction :global(.time) {
+    font-size: 1.75rem;
+    line-height: 1;
+  }
+  .prediction :global(.time small) {
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .prediction :global(.reco) {
+    margin-top: 0.75rem;
+  }
+  .prediction :global(.tag) {
+    display: inline-block;
+    margin-right: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    background: var(--fg);
+    color: var(--bg);
+  }
+  .prediction :global(.tag.competir) {
+    background: var(--ok);
+  }
+  .prediction :global(.tag.tempo) {
+    background: var(--warn);
+  }
+  .prediction :global(.tag.evitar) {
+    background: var(--accent);
+  }
+  .prediction :global(.claves) {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .prediction :global(.tools) {
+    font-size: 0.6rem;
+    color: var(--faint);
+  }
+  .prediction :global(.error) {
+    color: var(--warn);
+  }
+
+  /* --- Enjambre ------------------------------------------------------------- */
+  .prediction :global(.nodes) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0 0 0.9rem;
+  }
+  .prediction :global(.node) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--line);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .prediction :global(.node + .node)::before {
+    content: '';
+  }
+  .prediction :global(.node .dot) {
+    width: 8px;
+    height: 8px;
+    background: var(--faint);
+  }
+  .prediction :global(.node.active) {
+    color: var(--fg);
+    border-color: var(--accent);
+  }
+  .prediction :global(.node.active .dot) {
+    background: var(--accent);
+    animation: blink 0.64s steps(1) infinite;
+  }
+  .prediction :global(.node.done) {
+    color: var(--muted);
+  }
+  .prediction :global(.node.done .dot) {
+    background: var(--ok);
+  }
+  @keyframes blink {
+    50% {
+      background: var(--faint);
+    }
+  }
+  .prediction :global(.swarm-log) {
+    margin-top: 1rem;
+    border-top: 1px dashed var(--line);
+    padding-top: 0.75rem;
+  }
+  .prediction :global(.swarm-log summary) {
+    cursor: pointer;
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .prediction :global(.swarm-log summary:hover) {
+    color: var(--fg);
+  }
+  .prediction :global(.steps) {
+    list-style: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .prediction :global(.step) {
+    position: relative;
+    display: grid;
+    gap: 0.4rem;
+    padding: 0.6rem 0.7rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--faint);
+  }
+  .prediction :global(.step.running) {
+    border-left-color: var(--accent);
+  }
+  .prediction :global(.step.done) {
+    border-left-color: var(--ok);
+  }
+  .prediction :global(.step-head) {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .prediction :global(.step-head .ms) {
+    color: var(--faint);
+    text-transform: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .prediction :global(.step.running .ms) {
+    color: var(--accent);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .prediction :global(.tool-row) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .prediction :global(.tool-row:empty) {
+    display: none;
+  }
+  .prediction :global(.chip),
+  .prediction :global(.step-tools) {
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--line);
+    font-family: var(--font-pixel);
+    font-size: 0.58rem;
+    color: var(--muted);
+    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+  }
+  .prediction :global(.step-tools) {
+    width: fit-content;
+    margin: 0;
+  }
+  .prediction :global(.chip.running) {
+    color: var(--accent);
+    border-color: var(--accent);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .prediction :global(.chip.done) {
+    color: var(--ok);
+  }
+  .prediction :global(.chip.fail) {
+    color: var(--warn);
+    border-color: var(--warn);
+  }
+  .prediction :global(.step .msg) {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  .prediction :global(.step .ctx) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.75rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .prediction :global(.step .ctx .k) {
+    color: var(--faint);
+    font-size: 0.58rem;
+  }
+  .prediction :global(.step .ctx .k)::after {
+    content: ':';
+  }
+  .prediction :global(.step .next) {
+    margin: 0;
+    font-size: 0.6rem;
+    color: var(--accent);
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.4;
+    }
+  }
+  .action {
+    align-self: start;
+  }
+  .empty {
+    color: var(--muted);
+  }
+  @media (max-width: 600px) {
+    .race {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+    .when {
+      grid-auto-flow: column;
+      justify-content: start;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .prediction :global(.node.active .dot),
+    .prediction :global(.chip.running),
+    .prediction :global(.step.running .ms) {
+      animation: none;
+    }
+  }
+</style>

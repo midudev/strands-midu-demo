@@ -1,0 +1,1127 @@
+---
+interface Props {
+  hint?: string
+  suggestions?: string[]
+  runId?: string
+}
+const {
+  hint = 'El hilo queda aquí. Pregunta y sigue cada herramienta al vuelo.',
+  suggestions = [
+    '¿Cómo llego de piernas esta semana?',
+    '¿Qué carrera me recomiendas antes de Valencia?',
+    'Plan para los próximos 3 días',
+  ],
+  runId,
+} = Astro.props
+---
+
+<aside class="chat" id="chat" data-run-id={runId}>
+  <button
+    class="grip"
+    id="chat-resize"
+    type="button"
+    role="separator"
+    aria-label="Cambiar tamaño del chat"
+    aria-orientation="vertical"
+    aria-controls="chat"
+    aria-valuemin="52"
+    aria-valuemax="720"
+    aria-valuenow="416"
+    title="Arrastra para cambiar el tamaño. Doble clic para plegar."
+  >
+    <i aria-hidden="true"></i>
+  </button>
+  <div class="pane">
+    <button class="rail" id="chat-open" type="button" title="Abrir el chat" aria-expanded="true">
+      <img class="face" src="/team/entrenador.webp" alt="" width="512" height="512" decoding="async" />
+      <span class="pixel tag">Coach</span>
+    </button>
+    <div class="head">
+      <button class="pixel ctx" id="chat-ctx" type="button" title="Forzar al ConversationManager a recortar el historial ahora">
+        <span class="ctx-text">contexto · …</span>
+      </button>
+    </div>
+    <div class="log" id="chat-log" aria-live="polite">
+      <p class="hint">{hint}</p>
+    </div>
+    <form id="chat-form">
+      <input id="chat-input" type="text" name="message" placeholder="Escríbele al coach…" autocomplete="off" required />
+      <button class="btn" type="submit">Enviar</button>
+    </form>
+    <div class="chips">
+      {suggestions.map((s) => <button type="button" class="chip" data-msg={s}>{s}</button>)}
+    </div>
+  </div>
+</aside>
+<script is:inline>
+  (() => {
+    const chat = document.getElementById('chat')
+    if (!chat || window.matchMedia('(max-width: 960px)').matches) return
+    const w = Number(localStorage.getItem('midu-chat-w'))
+    if (Number.isFinite(w) && w >= 52) chat.style.width = `${w}px`
+  })()
+</script>
+
+<script>
+  const TOOLS: Record<string, string> = {
+    queryTrainingLoadAssessment: 'Carga de entrenamiento',
+    queryRecoveryStatus: 'Recuperación',
+    querySportRecords: 'Entrenamientos',
+    getActivityDetail: 'Detalle de la sesión',
+    queryActivityLapData: 'Vueltas',
+    queryFitnessAssessmentOverview: 'Fitness',
+    querySleepData: 'Sueño',
+    get_upcoming_races: 'Próximas carreras',
+    save_race_prediction: 'Guardar predicción',
+    guardar_preferencia: 'Guardar preferencia (estado)',
+    ver_preferencias: 'Leer preferencias (estado)',
+    recordar: 'Guardar en memoria',
+    buscar_en_memoria: 'Buscar en memoria',
+  }
+  const TEAM: Record<string, string> = { fisio: 'Fisioterapeuta', nutricionista: 'Nutricionista' }
+  const MANAGER: Record<string, string> = { 'sliding-window': 'ventana deslizante', summarizing: 'resumen' }
+
+  const log = document.getElementById('chat-log')!
+  const form = document.getElementById('chat-form') as HTMLFormElement
+  const input = document.getElementById('chat-input') as HTMLInputElement
+  const submit = form.querySelector('button')!
+  const ctxBtn = document.getElementById('chat-ctx') as HTMLButtonElement
+  const ctxText = ctxBtn.querySelector('.ctx-text')!
+  const runId = () => document.getElementById('chat')?.dataset.runId || undefined
+
+  const label = (name: string) => TOOLS[name] ?? name
+  const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`)
+
+  // Solo el log: scrollIntoView también mueve .app/.content y deja el hilo cortado
+  const NEAR_BOTTOM = 64
+  let pinned = true
+  const isPinned = () => log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM
+  const stick = (force = false) => {
+    if (!force && !pinned) return
+    log.scrollTop = log.scrollHeight
+  }
+  log.addEventListener('scroll', () => { pinned = isPinned() }, { passive: true })
+
+  // Cabecera con cara y nombre de quien habla. El chat siempre es el entrenador; los especialistas tienen la suya.
+  const speaker = (id: string, name: string) => {
+    const head = document.createElement('div')
+    head.className = 'speaker'
+    const avatar = document.createElement('img')
+    avatar.className = 'avatar'
+    avatar.src = `/team/${id}.webp`
+    avatar.alt = ''
+    avatar.width = avatar.height = 512
+    avatar.decoding = 'async'
+    avatar.onerror = () => {
+      const mono = document.createElement('i')
+      mono.className = 'avatar mono pixel'
+      mono.textContent = name.slice(0, 1)
+      avatar.replaceWith(mono)
+    }
+    const who = document.createElement('span')
+    who.className = 'who pixel'
+    who.textContent = name
+    head.append(avatar, who)
+    return head
+  }
+
+  const add = (cls: string, text = '') => {
+    const el = document.createElement('div')
+    el.className = `msg ${cls}`
+    if (cls.split(/\s+/).includes('bot')) {
+      const body = document.createElement('span')
+      body.className = 'body'
+      body.textContent = text
+      el.append(speaker('entrenador', 'Entrenador'), body)
+    } else {
+      el.textContent = text
+    }
+    log.append(el)
+    stick(cls === 'user')
+    return el
+  }
+
+  let thinking: HTMLElement | null = null
+
+  const showThinking = () => {
+    if (!thinking) {
+      thinking = document.createElement('div')
+      thinking.className = 'think'
+      thinking.setAttribute('aria-busy', 'true')
+      const px = document.createElement('i')
+      px.className = 'px'
+      px.setAttribute('aria-hidden', 'true')
+      for (let i = 0; i < 4; i++) px.append(document.createElement('b'))
+      const status = document.createElement('span')
+      status.className = 'status'
+      status.textContent = 'Pensando'
+      thinking.append(px, status)
+    }
+    log.append(thinking)
+    stick()
+  }
+
+  const hideThinking = () => {
+    thinking?.remove()
+    thinking = null
+  }
+
+  const startStream = (el: HTMLElement) => {
+    el.classList.add('streaming')
+    el.setAttribute('aria-busy', 'true')
+  }
+
+  const endStream = (el: HTMLElement | null) => {
+    el?.classList.remove('streaming')
+    el?.removeAttribute('aria-busy')
+  }
+
+  const write = (el: HTMLElement, chunk: string) => {
+    const body = el.querySelector('.body') ?? el
+    body.textContent += chunk
+  }
+
+  type Turn = { tools: HTMLUListElement | null; bot: HTMLElement | null }
+
+  const toolList = (turn: Turn) => {
+    if (!turn.tools || turn.bot) {
+      const list = document.createElement('ul')
+      list.className = 'tools'
+      thinking ? thinking.before(list) : log.append(list)
+      turn.tools = list
+      turn.bot = null
+    }
+    return turn.tools
+  }
+
+  const pixels = () => {
+    const px = document.createElement('i')
+    px.className = 'px'
+    px.setAttribute('aria-hidden', 'true')
+    for (let i = 0; i < 4; i++) px.append(document.createElement('b'))
+    return px
+  }
+
+  // Especialista (agent as tool): tarjeta con su nombre, la pregunta que le hace el entrenador,
+  // sus propias tools y lo que va escribiendo, en vivo.
+  const startAgent = (turn: Turn, id: string, name: string, input: string) => {
+    const li = document.createElement('li')
+    li.className = 'agent running'
+    li.dataset.id = id
+    li.setAttribute('aria-busy', 'true')
+    const head = speaker(name, TEAM[name] ?? name)
+    head.classList.add('agent-head')
+    const ms = document.createElement('span')
+    ms.className = 'ms'
+    ms.textContent = '…'
+    head.append(pixels(), ms)
+    const ask = document.createElement('p')
+    ask.className = 'ask'
+    ask.textContent = input
+    const tools = document.createElement('ul')
+    tools.className = 'tools sub'
+    const say = document.createElement('p')
+    say.className = 'say'
+    li.append(head, ask, tools, say)
+    toolList(turn).append(li)
+    stick()
+  }
+
+  const agentText = (id: string, text: string) => {
+    const li = log.querySelector<HTMLElement>(`.agent[data-id="${CSS.escape(id)}"]`)
+    const say = li?.querySelector('.say')
+    if (!say) return
+    say.textContent += text.replaceAll('**', '')
+    stick()
+  }
+
+  const endAgent = (id: string, ms: number, ok: boolean) => {
+    const li = log.querySelector<HTMLElement>(`.agent[data-id="${CSS.escape(id)}"]`)
+    if (!li) return
+    li.classList.remove('running')
+    li.classList.add(ok ? 'done' : 'fail')
+    li.removeAttribute('aria-busy')
+    const time = li.querySelector('.agent-head .ms')
+    if (time) time.textContent = fmtMs(ms)
+  }
+
+  const startTool = (turn: Turn, id: string, name: string, parent?: string) => {
+    const host = parent
+      ? log.querySelector<HTMLUListElement>(`.agent[data-id="${CSS.escape(parent)}"] .tools`) ?? toolList(turn)
+      : toolList(turn)
+    const li = document.createElement('li')
+    li.className = 'tool running'
+    li.dataset.id = id
+    li.setAttribute('aria-busy', 'true')
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'row'
+    row.disabled = true
+    row.title = name
+    const px = document.createElement('i')
+    px.className = 'px'
+    px.setAttribute('aria-hidden', 'true')
+    for (let i = 0; i < 4; i++) px.append(document.createElement('b'))
+    const nameEl = document.createElement('span')
+    nameEl.className = 'name'
+    nameEl.textContent = label(name)
+    const ms = document.createElement('span')
+    ms.className = 'ms'
+    ms.textContent = '…'
+    row.append(px, nameEl, ms)
+    li.append(row)
+    host.append(li)
+    stick()
+  }
+
+  const endTool = (_turn: Turn, id: string, ms: number, ok: boolean, input?: unknown, output?: string) => {
+    const li = log.querySelector<HTMLLIElement>(`.tool[data-id="${CSS.escape(id)}"]`)
+    if (!li) return
+    li.classList.remove('running')
+    li.classList.add(ok ? 'done' : 'fail')
+    li.removeAttribute('aria-busy')
+    const time = li.querySelector('.ms')
+    if (time) time.textContent = fmtMs(ms)
+
+    const row = li.querySelector<HTMLButtonElement>('.row')
+    if (!row || (input === undefined && !output)) return
+
+    const io = document.createElement('div')
+    io.className = 'io'
+    if (input !== undefined) {
+      const k = document.createElement('p')
+      k.className = 'pixel k'
+      k.textContent = 'entrada'
+      const pre = document.createElement('pre')
+      pre.textContent = typeof input === 'string' ? input : JSON.stringify(input, null, 2)
+      io.append(k, pre)
+    }
+    if (output) {
+      const k = document.createElement('p')
+      k.className = 'pixel k'
+      k.textContent = 'resultado'
+      const pre = document.createElement('pre')
+      pre.textContent = output
+      io.append(k, pre)
+    }
+    const caret = document.createElement('span')
+    caret.className = 'caret'
+    caret.setAttribute('aria-hidden', 'true')
+    caret.textContent = '+'
+    row.append(caret)
+    li.append(io)
+    li.classList.add('has-out')
+    row.disabled = false
+    row.setAttribute('aria-expanded', 'false')
+    row.addEventListener('click', () => {
+      const open = li.classList.toggle('open')
+      caret.textContent = open ? '–' : '+'
+      row.setAttribute('aria-expanded', String(open))
+      stick()
+    })
+  }
+
+  type Ctx = { manager: string; sessionId: string; mensajes: number; ventana: number | null; recientes: number | null; resumen: string | null }
+
+  const renderContext = (ctx: Ctx, cayeron = 0) => {
+    const limit = ctx.ventana != null ? `/${ctx.ventana}` : ''
+    ctxText.textContent = `contexto · ${ctx.mensajes}${limit} msgs · ${MANAGER[ctx.manager] ?? ctx.manager}`
+    ctxBtn.classList.toggle('full', ctx.ventana != null && ctx.mensajes >= ctx.ventana)
+    ctxBtn.classList.toggle('summary', Boolean(ctx.resumen))
+    ctxBtn.title = ctx.resumen
+      ? `Resumen activo:\n${ctx.resumen}`
+      : `Sesión ${ctx.sessionId} en disco. Click: forzar recorte del historial ahora.`
+    if (cayeron > 0) {
+      const note = document.createElement('p')
+      note.className = 'ctx-note'
+      note.textContent = `Ventana deslizante: ${cayeron} mensaje${cayeron === 1 ? '' : 's'} antiguo${cayeron === 1 ? '' : 's'} fuera del contexto`
+      log.append(note)
+      stick()
+    }
+  }
+
+  // Al cargar: contexto + historial restaurado de la sesión en disco (SessionManager)
+  fetch(`/api/context${runId() ? `?runId=${runId()}` : ''}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((ctx) => {
+      if (!ctx) return
+      const history: { role: string; text: string }[] = ctx.historial ?? []
+      if (history.length) {
+        log.querySelector('.hint')?.remove()
+        const note = document.createElement('p')
+        note.className = 'ctx-note restored'
+        note.textContent = `Sesión ${ctx.sessionId} restaurada de disco · ${ctx.mensajes} mensajes`
+        log.append(note)
+        for (const m of history) add(m.role === 'user' ? 'user' : 'bot', m.text.replaceAll('**', ''))
+        stick(true)
+      }
+      renderContext(ctx)
+    })
+    .catch(() => {})
+
+  ctxBtn.addEventListener('click', async () => {
+    ctxBtn.disabled = true
+    ctxText.textContent = 'contexto · recortando…'
+    try {
+      const res = await fetch('/api/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: runId() }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      renderContext(data)
+      const note = document.createElement('p')
+      note.className = 'ctx-note'
+      note.textContent = data.reducido
+        ? data.resumen
+          ? `Historial resumido: ${data.antes} → ${data.mensajes} mensajes. El resumen sustituye a lo antiguo.`
+          : `Historial recortado: ${data.antes} → ${data.mensajes} mensajes.`
+        : `Nada que recortar (${data.mensajes} mensajes).`
+      log.append(note)
+      if (data.resumen) {
+        const sum = document.createElement('p')
+        sum.className = 'ctx-summary'
+        sum.textContent = data.resumen
+        log.append(sum)
+      }
+      stick(true)
+    } catch (err) {
+      ctxText.textContent = `contexto · ${(err as Error).message}`
+    } finally {
+      ctxBtn.disabled = false
+    }
+  })
+
+  async function send(message: string) {
+    log.querySelector('.hint')?.remove()
+    add('user', message)
+    const turn: Turn = { tools: null, bot: null }
+    showThinking()
+    submit.disabled = true
+    input.value = ''
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, runId: document.getElementById('chat')?.dataset.runId || undefined }),
+      })
+      if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const chunk = JSON.parse(line)
+          if (chunk.type === 'text') {
+            if (!turn.bot) {
+              hideThinking()
+              turn.bot = add('bot')
+              startStream(turn.bot)
+            }
+            write(turn.bot, chunk.text.replaceAll('**', ''))
+            stick()
+          } else if (chunk.type === 'tool_start') {
+            startTool(turn, chunk.id, chunk.name, chunk.parent)
+            if (!turn.bot) showThinking()
+          } else if (chunk.type === 'tool_end') {
+            endTool(turn, chunk.id, chunk.ms, chunk.ok !== false, chunk.input, chunk.output)
+          } else if (chunk.type === 'agent_start') {
+            startAgent(turn, chunk.id, chunk.name, chunk.input)
+            if (!turn.bot) showThinking()
+          } else if (chunk.type === 'agent_text') {
+            agentText(chunk.id, chunk.text)
+          } else if (chunk.type === 'agent_end') {
+            endAgent(chunk.id, chunk.ms, chunk.ok !== false)
+          } else if (chunk.type === 'context') {
+            renderContext(chunk.context, chunk.cayeron)
+          } else if (chunk.type === 'error') {
+            if (!turn.bot) {
+              hideThinking()
+              turn.bot = add('bot')
+            }
+            write(turn.bot, `\n[error] ${chunk.message}`)
+          }
+        }
+      }
+      if (!turn.bot && !turn.tools) add('bot', '')
+    } catch (err) {
+      hideThinking()
+      add('bot', `Error: ${(err as Error).message}`)
+    } finally {
+      hideThinking()
+      endStream(turn.bot)
+      submit.disabled = false
+      input.focus()
+      // El panel de estado/memoria se refresca solo (la extracción de memoria corre en segundo plano)
+      document.dispatchEvent(new CustomEvent('coach:turn'))
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const message = input.value.trim()
+    if (message) send(message)
+  })
+  document.querySelectorAll<HTMLButtonElement>('.chip').forEach((c) => c.addEventListener('click', () => send(c.dataset.msg!)))
+
+  const KEY_W = 'midu-chat-w'
+  const KEY_OPEN = 'midu-chat-w-open'
+  const COLLAPSED = 52
+  const SNAP = 220
+  const MIN_OPEN = 272
+  const DEFAULT_W = 416
+  const chatEl = document.getElementById('chat') as HTMLElement
+  const grip = document.getElementById('chat-resize') as HTMLButtonElement
+  const rail = document.getElementById('chat-open') as HTMLButtonElement
+  const desktop = () => !window.matchMedia('(max-width: 960px)').matches
+  const maxW = () => Math.min(720, Math.round(window.innerWidth * 0.52))
+  const lastOpen = () => {
+    const saved = Number(localStorage.getItem(KEY_OPEN))
+    return Number.isFinite(saved) && saved >= MIN_OPEN ? saved : DEFAULT_W
+  }
+  const applyWidth = (px: number, persist = true) => {
+    if (!desktop()) {
+      chatEl.style.width = ''
+      delete chatEl.dataset.collapsed
+      return
+    }
+    let w = Math.round(px)
+    if (w < SNAP) w = COLLAPSED
+    else w = Math.min(maxW(), Math.max(MIN_OPEN, w))
+    chatEl.style.width = `${w}px`
+    chatEl.dataset.collapsed = w <= COLLAPSED ? 'true' : 'false'
+    grip.setAttribute('aria-valuenow', String(w))
+    grip.setAttribute('aria-valuemin', String(COLLAPSED))
+    grip.setAttribute('aria-valuemax', String(maxW()))
+    rail.setAttribute('aria-expanded', String(w > COLLAPSED))
+    if (!persist) return
+    localStorage.setItem(KEY_W, String(w))
+    if (w > COLLAPSED) localStorage.setItem(KEY_OPEN, String(w))
+  }
+
+  applyWidth(chatEl.getBoundingClientRect().width, false)
+
+  grip.addEventListener('pointerdown', (e) => {
+    if (!desktop() || e.button !== 0) return
+    e.preventDefault()
+    try { grip.setPointerCapture(e.pointerId) } catch {}
+    chatEl.classList.add('is-resizing')
+    document.body.classList.add('chat-resizing')
+    const startX = e.clientX
+    const startW = chatEl.getBoundingClientRect().width
+    const onMove = (ev: PointerEvent) => applyWidth(startW + (startX - ev.clientX), false)
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return
+      grip.releasePointerCapture(ev.pointerId)
+      grip.removeEventListener('pointermove', onMove)
+      grip.removeEventListener('pointerup', onUp)
+      grip.removeEventListener('pointercancel', onUp)
+      chatEl.classList.remove('is-resizing')
+      document.body.classList.remove('chat-resizing')
+      applyWidth(chatEl.getBoundingClientRect().width)
+    }
+    grip.addEventListener('pointermove', onMove)
+    grip.addEventListener('pointerup', onUp)
+    grip.addEventListener('pointercancel', onUp)
+  })
+  grip.addEventListener('dblclick', () => {
+    if (!desktop()) return
+    applyWidth(chatEl.dataset.collapsed === 'true' ? lastOpen() : COLLAPSED)
+  })
+  grip.addEventListener('keydown', (e) => {
+    if (!desktop()) return
+    const w = chatEl.getBoundingClientRect().width
+    const step = e.shiftKey ? 80 : 24
+    if (e.key === 'ArrowLeft') { e.preventDefault(); applyWidth(w + step) }
+    if (e.key === 'ArrowRight') { e.preventDefault(); applyWidth(w - step) }
+    if (e.key === 'Home') { e.preventDefault(); applyWidth(COLLAPSED) }
+    if (e.key === 'End') { e.preventDefault(); applyWidth(maxW()) }
+  })
+  rail.addEventListener('click', () => applyWidth(lastOpen()))
+  window.addEventListener('resize', () => {
+    if (!desktop()) {
+      chatEl.style.width = ''
+      delete chatEl.dataset.collapsed
+      return
+    }
+    const w = chatEl.getBoundingClientRect().width
+    if (w > maxW()) applyWidth(maxW())
+  })
+</script>
+
+<style>
+  .chat {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: var(--chat-w, min(26rem, 36vw));
+    min-width: 3.25rem;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    border-left: 1px solid var(--line);
+    container-type: inline-size;
+    container-name: chat;
+    transition: width 0.18s ease;
+  }
+  .chat.is-resizing {
+    transition: none;
+  }
+  .grip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 12px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .grip::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 1px;
+    background: transparent;
+    transition: background 0.15s, width 0.15s, box-shadow 0.15s;
+  }
+  .grip:hover::after,
+  .chat.is-resizing .grip::after,
+  .grip:focus-visible::after {
+    width: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .grip:focus-visible {
+    outline: none;
+  }
+  .grip i {
+    position: absolute;
+    left: 3px;
+    top: 50%;
+    width: 3px;
+    height: 18px;
+    transform: translateY(-50%);
+    background: repeating-linear-gradient(to bottom, var(--faint) 0 2px, transparent 2px 4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+  .chat:hover .grip i,
+  .grip:hover i,
+  .chat.is-resizing .grip i {
+    opacity: 1;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    padding: 1.25rem 1.15rem 1rem;
+  }
+  .rail {
+    display: none;
+  }
+  .head {
+    display: flex;
+    justify-content: flex-end;
+    align-items: baseline;
+    flex-shrink: 0;
+    margin-bottom: 0.75rem;
+  }
+  .ctx {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--faint);
+    white-space: nowrap;
+  }
+  .ctx:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+  }
+  .ctx.full {
+    color: var(--warn);
+    border-color: #5a4a10;
+  }
+  .ctx.summary {
+    color: var(--ok);
+  }
+  .ctx:disabled {
+    opacity: 0.6;
+  }
+  .log :global(.ctx-note) {
+    margin: 0;
+    padding: 0.35rem 0.5rem;
+    border: 1px dashed var(--line);
+    color: var(--warn);
+    font-family: var(--font-pixel);
+    font-size: 0.6rem;
+    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+  }
+  .log :global(.ctx-note.restored) {
+    color: var(--ok);
+    border-color: var(--line);
+  }
+  .log :global(.ctx-summary) {
+    margin: 0;
+    padding: 0.5rem 0.65rem;
+    border-left: 2px solid var(--ok);
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-style: italic;
+    white-space: pre-wrap;
+  }
+  /* Quien habla: cara + nombre. Lo usan el coach y los especialistas. */
+  .log :global(.speaker) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .log :global(.speaker .avatar) {
+    width: 2.25rem;
+    height: 2.25rem;
+    flex-shrink: 0;
+    display: block;
+    object-fit: cover;
+    object-position: 50% 10%;
+    background: radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--ok) 18%, transparent), transparent 70%);
+  }
+  .log :global(.speaker .avatar.mono) {
+    display: grid;
+    place-items: center;
+    font-style: normal;
+    font-size: 0.9rem;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .log :global(.speaker .who) {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .log :global(.agent) {
+    display: grid;
+    gap: 0.3rem;
+  }
+  .log :global(.agent-head) {
+    margin-bottom: 0;
+  }
+  .log :global(.agent-head .ms) {
+    color: var(--faint);
+    font-family: var(--font-pixel);
+    font-size: 0.6rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .log :global(.agent.running .px b) {
+    animation: px 0.64s steps(1) infinite;
+  }
+  .log :global(.agent.done .px) {
+    background: var(--ok);
+  }
+  .log :global(.agent.done .px b),
+  .log :global(.agent.fail .px b) {
+    display: none;
+  }
+  .log :global(.agent.fail .px) {
+    background: var(--warn);
+  }
+  .log :global(.agent .ask) {
+    margin: 0 0 0.2rem;
+    padding-left: 2.75rem;
+    color: var(--faint);
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+  .log :global(.agent .ask)::before {
+    content: 'entrenador › ';
+    font-family: var(--font-pixel);
+    font-size: 0.6rem;
+  }
+  .log :global(.agent .tools.sub) {
+    padding-left: 2.75rem;
+  }
+  .log :global(.agent .tools.sub:empty) {
+    display: none;
+  }
+  .log :global(.agent .say) {
+    margin: 0;
+    padding-left: 2.75rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--fg);
+    white-space: pre-wrap;
+  }
+  .log :global(.agent .say:empty) {
+    display: none;
+  }
+  .log {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 0.25rem;
+    scrollbar-color: var(--line) transparent;
+  }
+  /* Hijos de un flex column con scroll: sin esto encogen (min-height explícito) y el texto se solapa */
+  .log > :global(*) {
+    flex-shrink: 0;
+  }
+  .log :global(.hint) {
+    margin: 0;
+    color: var(--faint);
+    font-size: 0.7rem;
+    line-height: 1.45;
+  }
+  .log :global(.msg) {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .log :global(.user) {
+    color: var(--muted);
+  }
+  .log :global(.user)::before {
+    content: '> ';
+    color: var(--accent);
+    font-family: var(--font-pixel);
+  }
+  .log :global(.bot) {
+    min-height: 1.25rem;
+  }
+  .log :global(.bot .body) {
+    display: block;
+    padding-left: 2.75rem;
+    white-space: pre-wrap;
+  }
+  /* Cierre vacío del coach (solo delegó): sin cuerpo no ocupa sitio */
+  .log :global(.bot:not(.streaming) .body:empty) {
+    display: none;
+  }
+  .log :global(.think) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: fit-content;
+    color: var(--faint);
+    font-family: var(--font-pixel);
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .log :global(.think .px b) {
+    animation: px 0.64s steps(1) infinite;
+  }
+  .log :global(.think .px b:nth-child(1)) {
+    animation-delay: 0s;
+  }
+  .log :global(.think .px b:nth-child(2)) {
+    animation-delay: 0.16s;
+  }
+  .log :global(.think .px b:nth-child(3)) {
+    animation-delay: 0.48s;
+  }
+  .log :global(.think .px b:nth-child(4)) {
+    animation-delay: 0.32s;
+  }
+  .log :global(.bot.streaming .body::after) {
+    content: '';
+    display: inline-block;
+    width: 0.55em;
+    height: 0.55em;
+    margin-left: 0.18em;
+    vertical-align: 0.08em;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: caret 0.9s ease-in-out infinite;
+  }
+  @keyframes caret {
+    50% {
+      opacity: 0.22;
+    }
+  }
+  .log :global(.tools) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .log :global(.tool) {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    font-family: var(--font-pixel);
+    font-size: 0.65rem;
+    letter-spacing: 0.01em;
+  }
+  .log :global(.tool .row) {
+    display: grid;
+    grid-template-columns: 10px 1fr auto;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+    cursor: default;
+  }
+  .log :global(.tool.has-out .row) {
+    grid-template-columns: 10px 1fr auto 0.7rem;
+    cursor: pointer;
+  }
+  .log :global(.tool.has-out .row:hover) {
+    color: var(--fg);
+  }
+  .log :global(.tool.has-out:hover),
+  .log :global(.tool.open) {
+    border-color: #333;
+  }
+  .log :global(.tool .caret) {
+    color: var(--faint);
+    font-size: 0.7rem;
+    line-height: 1;
+    text-align: center;
+  }
+  .log :global(.tool .io) {
+    display: none;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem 0.55rem;
+    border-top: 1px dashed var(--line);
+  }
+  .log :global(.tool.open .io) {
+    display: grid;
+  }
+  .log :global(.tool .io .k) {
+    margin: 0.35rem 0 0;
+    color: var(--faint);
+    font-size: 0.55rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .log :global(.tool .io .k:first-child) {
+    margin-top: 0.15rem;
+  }
+  .log :global(.tool .io pre) {
+    margin: 0;
+    max-height: 16rem;
+    overflow: auto;
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    scrollbar-color: var(--line) transparent;
+  }
+  .log :global(.tool .name) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .log :global(.tool .ms) {
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .log :global(.tool.running .ms) {
+    color: var(--muted);
+  }
+  .log :global(.tool.fail) {
+    border-color: var(--accent);
+  }
+  .log :global(.tool.fail .ms) {
+    color: var(--accent);
+  }
+  .log :global(.px) {
+    width: 10px;
+    height: 10px;
+    display: grid;
+    grid-template: 1fr 1fr / 1fr 1fr;
+    gap: 1px;
+  }
+  .log :global(.px b) {
+    background: var(--faint);
+  }
+  .log :global(.tool.running .px b) {
+    animation: px 0.64s steps(1) infinite;
+  }
+  .log :global(.tool.running .px b:nth-child(1)) {
+    animation-delay: 0s;
+  }
+  .log :global(.tool.running .px b:nth-child(2)) {
+    animation-delay: 0.16s;
+  }
+  .log :global(.tool.running .px b:nth-child(3)) {
+    animation-delay: 0.48s;
+  }
+  .log :global(.tool.running .px b:nth-child(4)) {
+    animation-delay: 0.32s;
+  }
+  .log :global(.tool.done .px) {
+    background: var(--ok);
+  }
+  .log :global(.tool.done .px b),
+  .log :global(.tool.fail .px b) {
+    display: none;
+    animation: none;
+  }
+  .log :global(.tool.fail .px) {
+    background: var(--accent);
+  }
+  @keyframes px {
+    0%,
+    24% {
+      background: var(--accent);
+    }
+    25%,
+    100% {
+      background: var(--faint);
+    }
+  }
+  form {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    margin-top: 0.9rem;
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--fg);
+    font: inherit;
+    outline: none;
+  }
+  input:focus {
+    border-color: var(--fg);
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.65rem;
+    flex-shrink: 0;
+  }
+  .chip {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    text-align: left;
+  }
+  .chip:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chat {
+      transition: none;
+    }
+    .log :global(.tool.running .px b) {
+      animation: none;
+      background: var(--accent);
+    }
+    .log :global(.think .px b),
+    .log :global(.bot.streaming .body::after) {
+      animation: none;
+    }
+    .log :global(.think .px b) {
+      background: var(--accent);
+    }
+  }
+  @media (max-width: 960px) {
+    .chat {
+      width: 100%;
+      min-width: 0;
+      container-type: normal;
+    }
+    .grip,
+    .rail {
+      display: none;
+    }
+  }
+  :global(body.chat-resizing) {
+    cursor: col-resize !important;
+    user-select: none !important;
+  }
+  :global(body.chat-resizing *) {
+    cursor: col-resize !important;
+  }
+  @container chat (max-width: 22rem) {
+    .chips {
+      display: none;
+    }
+    .pane {
+      padding: 1rem 0.85rem 0.85rem;
+    }
+    form .btn {
+      padding-inline: 0.7rem;
+    }
+  }
+  @container chat (max-width: 5.5rem) {
+    .pane {
+      padding: 0;
+      align-items: stretch;
+    }
+    .head,
+    .log,
+    form,
+    .chips {
+      display: none;
+    }
+    .rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 1rem;
+      width: 100%;
+      height: 100%;
+      padding: 1.15rem 0 1rem;
+      background: transparent;
+      border: 0;
+      color: var(--faint);
+    }
+    .rail:hover {
+      color: var(--fg);
+      background: var(--bg-2);
+    }
+    .rail .face {
+      width: 1.85rem;
+      height: 1.85rem;
+      flex-shrink: 0;
+      display: block;
+      object-fit: cover;
+      object-position: 50% 10%;
+    }
+    .rail .tag {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      font-size: 0.65rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+  }
+</style>

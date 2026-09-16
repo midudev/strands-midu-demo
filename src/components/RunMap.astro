@@ -1,0 +1,112 @@
+---
+interface Props {
+  track: [number, number][]
+}
+const { track } = Astro.props
+if (track.length < 2) return
+---
+
+<section class="map">
+  <p class="label">Recorrido</p>
+  <div id="run-map" data-track={JSON.stringify(track)}></div>
+</section>
+
+<script>
+  const root = document.getElementById('run-map')
+  if (root && !root.dataset.ready) {
+    root.dataset.ready = '1'
+    const track = JSON.parse(root.dataset.track || '[]') as [number, number][]
+    const css = document.createElement('link')
+    css.rel = 'stylesheet'
+    css.href = 'https://unpkg.com/maplibre-gl@5.7.3/dist/maplibre-gl.css'
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/maplibre-gl@5.7.3/dist/maplibre-gl.js'
+    script.onload = async () => {
+      type LngLat = [number, number]
+      type Layer = {
+        id?: string
+        type: string
+        source?: string
+        layout?: Record<string, unknown>
+        paint?: Record<string, unknown>
+      }
+      type Style = { layers: Layer[]; sources: Record<string, unknown> }
+      type MapLibre = {
+        Map: new (opts: object) => { scrollZoom: { disable: () => void } }
+      }
+      const maplibregl = (window as unknown as { maplibregl: MapLibre }).maplibregl
+      const style = (await fetch('https://tiles.openfreemap.org/styles/dark').then((r) => r.json())) as Style
+      style.layers = style.layers.filter((l) => l.type !== 'symbol')
+      const coords: LngLat[] = track.map(([lat, lng]) => [lng, lat])
+      style.sources.track = { type: 'geojson', data: { type: 'LineString', coordinates: coords } }
+      style.sources.start = { type: 'geojson', data: { type: 'Point', coordinates: coords[0] } }
+      style.sources.end = { type: 'geojson', data: { type: 'Point', coordinates: coords[coords.length - 1] } }
+      style.layers.push(
+        {
+          id: 'track-glow',
+          type: 'line',
+          source: 'track',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ff6b00', 'line-width': 8, 'line-opacity': 0.16 },
+        },
+        {
+          id: 'track-line',
+          type: 'line',
+          source: 'track',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ff6b00', 'line-width': 2.5, 'line-opacity': 0.95 },
+        },
+        {
+          id: 'start',
+          type: 'circle',
+          source: 'start',
+          paint: { 'circle-radius': 3.5, 'circle-color': '#3ddc84' },
+        },
+        {
+          id: 'end',
+          type: 'circle',
+          source: 'end',
+          paint: { 'circle-radius': 3.5, 'circle-color': '#ff6b00' },
+        },
+      )
+      const lngs = coords.map((c) => c[0])
+      const lats = coords.map((c) => c[1])
+      const map = new maplibregl.Map({
+        container: root,
+        style,
+        bounds: [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ],
+        fitBoundsOptions: { padding: 32, animate: false },
+        attributionControl: false,
+        fadeDuration: 0,
+        pitchWithRotate: false,
+        dragRotate: false,
+        renderWorldCopies: false,
+      })
+      map.scrollZoom.disable()
+    }
+    document.head.append(css, script)
+  }
+</script>
+
+<style>
+  .map {
+    padding: 0 0 2.5rem;
+  }
+  #run-map {
+    height: min(26rem, 52vh);
+    background: var(--bg);
+    border: 1px solid var(--line);
+  }
+  #run-map :global(.maplibregl-canvas-container),
+  #run-map :global(.maplibregl-canvas) {
+    width: 100%;
+    height: 100%;
+  }
+  #run-map :global(.maplibregl-ctrl-logo),
+  #run-map :global(.maplibregl-ctrl-attrib) {
+    display: none;
+  }
+</style>

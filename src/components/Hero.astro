@@ -1,0 +1,209 @@
+---
+// Portada sin COROS: qué es esto y por qué conectar el reloj
+---
+
+<section class="hero" id="hero">
+  <canvas class="dither" aria-hidden="true"></canvas>
+  <div class="inner">
+    <h1 class="pixel">
+      Tu reloj sabe<br />cómo estás.<br /><span class="accent">Tu coach sabe<br />qué hacer.</span>
+    </h1>
+    <p class="lead">
+      Conecta tu COROS y el coach leerá tus entrenamientos, tu forma y tu recuperación para decirte qué entrenar hoy
+      y cómo harías cada carrera de las próximas semanas.
+    </p>
+    <div class="cta">
+      <a class="btn" href="/api/auth/coros/login">
+        <img src="/coros.png" alt="" width="20" height="20" />
+        Conectar COROS
+      </a>
+      <a class="aws" href="https://aws.amazon.com/" target="_blank" rel="noopener">
+        <img src="/aws.png" alt="AWS" width="48" height="48" />
+      </a>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Fondo de dithering (Bayer 8x8) que sigue al ratón. Se pinta a baja resolución
+  // y se escala con image-rendering: pixelated para que se vean los píxeles.
+  const hero = document.getElementById('hero')!
+  const canvas = hero.querySelector<HTMLCanvasElement>('.dither')!
+  const ctx = canvas.getContext('2d', { alpha: true })!
+  const CELL = 6
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  const BAYER = [
+    [0, 32, 8, 40, 2, 34, 10, 42],
+    [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38],
+    [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41],
+    [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37],
+    [63, 31, 55, 23, 61, 29, 53, 21],
+  ].map((row) => row.map((v) => (v + 0.5) / 64))
+
+  let cols = 0
+  let rows = 0
+  let image: ImageData
+  let buffer: HTMLCanvasElement
+  let bctx: CanvasRenderingContext2D
+
+  const mouse = { x: 0.72, y: 0.4 } // objetivo, en coordenadas 0..1
+  const pos = { x: 0.72, y: 0.4 } // posición suavizada
+  let hasPointer = false
+
+  function resize() {
+    const { width, height } = hero.getBoundingClientRect()
+    cols = Math.max(1, Math.ceil(width / CELL))
+    rows = Math.max(1, Math.ceil(height / CELL))
+    canvas.width = cols
+    canvas.height = rows
+    canvas.style.width = `${cols * CELL}px`
+    canvas.style.height = `${rows * CELL}px`
+    buffer = document.createElement('canvas')
+    buffer.width = cols
+    buffer.height = rows
+    bctx = buffer.getContext('2d')!
+    image = bctx.createImageData(cols, rows)
+    ctx.imageSmoothingEnabled = false
+  }
+
+  const BASE = [72, 72, 72] // gris de los puntos lejanos
+  const HOT = [255, 107, 0] // naranja cerca del ratón
+
+  function paint(t: number) {
+    const data = image.data
+    const aspect = cols / rows
+    const cx = pos.x * cols
+    const cy = pos.y * rows
+    const radius = Math.max(cols, rows) * 0.55
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const dx = (x - cx) / radius
+        const dy = ((y - cy) / radius) * aspect
+        const d = Math.sqrt(dx * dx + dy * dy)
+        // luz radial + ondas lentas para que el fondo respire
+        const wave = 0.06 * Math.sin(x * 0.18 + t * 0.0012) * Math.cos(y * 0.22 - t * 0.0009)
+        // ruido determinista por celda para romper las bandas del Bayer
+        const jitter = ((((x * 374761393 + y * 668265263) ^ 0x5bd1e995) >>> 0) % 1000) / 1000 - 0.5
+        let v = Math.min(0.8, Math.max(0, 1 - d) ** 2.2 * 0.85) + wave + 0.02 + jitter * 0.07
+        // más denso hacia la parte inferior derecha, para dejar limpio el titular
+        v *= 0.55 + 0.45 * (x / cols) * 0.6 + 0.35 * (y / rows)
+        const on = v > BAYER[y & 7][x & 7]
+        const i = (y * cols + x) * 4
+        if (!on) {
+          data[i + 3] = 0
+          continue
+        }
+        const heat = Math.max(0, 1 - d * 1.6) ** 2
+        data[i] = BASE[0] + (HOT[0] - BASE[0]) * heat
+        data[i + 1] = BASE[1] + (HOT[1] - BASE[1]) * heat
+        data[i + 2] = BASE[2] + (HOT[2] - BASE[2]) * heat
+        data[i + 3] = 95 + 95 * heat
+      }
+    }
+    bctx.putImageData(image, 0, 0)
+    ctx.clearRect(0, 0, cols, rows)
+    ctx.drawImage(buffer, 0, 0)
+  }
+
+  function frame(t: number) {
+    if (!hasPointer && !reduced) {
+      // sin ratón: deriva lenta para que nunca esté quieto
+      mouse.x = 0.68 + 0.12 * Math.sin(t * 0.00025)
+      mouse.y = 0.42 + 0.14 * Math.cos(t * 0.00019)
+    }
+    pos.x += (mouse.x - pos.x) * 0.06
+    pos.y += (mouse.y - pos.y) * 0.06
+    paint(t)
+    if (!reduced) requestAnimationFrame(frame)
+  }
+
+  const track = (clientX: number, clientY: number) => {
+    const r = hero.getBoundingClientRect()
+    mouse.x = (clientX - r.left) / r.width
+    mouse.y = (clientY - r.top) / r.height
+    hasPointer = true
+  }
+  window.addEventListener('pointermove', (e) => track(e.clientX, e.clientY), { passive: true })
+  document.documentElement.addEventListener('pointerleave', () => (hasPointer = false))
+  window.addEventListener('resize', resize)
+
+  resize()
+  requestAnimationFrame(frame)
+</script>
+
+<style>
+  .hero {
+    position: relative;
+    /* sangrado completo: el fondo ocupa todo el ancho aunque main esté centrado */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    min-height: min(calc(100vh - 5.5rem), 60rem);
+    display: grid;
+    align-items: center;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+  }
+  .dither {
+    position: absolute;
+    inset: 0;
+    opacity: 0.7;
+    image-rendering: pixelated;
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+  }
+  .inner {
+    position: relative;
+    width: 100%;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: clamp(3rem, 8vh, 6rem) 1rem 3rem;
+    display: grid;
+    gap: 1.75rem;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.4rem, 8vw, 5.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    text-shadow: 0 0 40px rgb(10 10 10 / 0.9);
+  }
+  .accent {
+    color: var(--accent);
+  }
+  .lead {
+    margin: 0;
+    max-width: 36rem;
+    color: var(--muted);
+    font-size: clamp(1rem, 1.6vw, 1.2rem);
+    text-shadow: 0 0 24px rgb(10 10 10 / 0.9);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .cta .btn {
+    padding: 0.8rem 1.25rem;
+    font-size: 0.9rem;
+  }
+  .cta .aws {
+    display: flex;
+    align-items: center;
+    line-height: 0;
+  }
+  .cta .aws img {
+    display: block;
+    height: 2.7rem;
+    width: auto;
+  }
+  .cta .ghost {
+    background: rgb(10 10 10 / 0.6);
+    backdrop-filter: blur(2px);
+  }
+</style>

@@ -1,0 +1,360 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import Topbar from '../../components/Topbar.astro'
+import Chat from '../../components/Chat.astro'
+import RunMap from '../../components/RunMap.astro'
+import RunCharts from '../../components/RunCharts.astro'
+import Team from '../../components/Team.astro'
+import { isCorosConnected } from '../../agent/coros/auth'
+import { getRunDetail, parsePace } from '../../agent/coros/data'
+
+export const prerender = false
+
+const connected = isCorosConnected()
+if (!connected) return Astro.redirect('/')
+
+const id = Astro.params.id ?? ''
+if (!/^\d+$/.test(id)) return Astro.redirect('/')
+
+const run = await getRunDetail(id).catch(() => null)
+if (!run) return Astro.redirect('/')
+
+const m = run.metrics
+const day = new Intl.DateTimeFormat('es', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${run.fecha}T12:00:00`))
+
+const FOCO: Record<string, string> = {
+  Base: 'Base',
+  Tempo: 'Tempo',
+  Threshold: 'Umbral',
+  VO2max: 'VO2max',
+  Sprint: 'Sprint',
+  Recovery: 'Recuperación',
+}
+const REND: Record<string, string> = {
+  'Below Average': 'Por debajo',
+  Average: 'En media',
+  'Above Average': 'Por encima',
+  Excellent: 'Excelente',
+}
+
+type Stat = { k: string; v: string; u?: string }
+
+const hero: Stat[] = [
+  { k: 'Distancia', v: run.km.toFixed(2), u: 'km' },
+  { k: 'Ritmo', v: run.ritmo, u: '/km' },
+  { k: 'Tiempo', v: run.duracion, u: '' },
+  { k: 'FC media', v: run.fcMedia != null ? String(run.fcMedia) : '—', u: run.fcMedia != null ? 'bpm' : '' },
+]
+const extra: Stat[] = [
+  { k: 'Cadencia', v: m?.cadencia != null ? String(m.cadencia) : '—', u: m?.cadencia != null ? 'spm' : '' },
+  { k: 'Potencia', v: m?.potencia != null ? String(m.potencia) : '—', u: m?.potencia != null ? 'W' : '' },
+  { k: 'Desnivel', v: m?.desnivelPos != null ? `+${m.desnivelPos}` : '—', u: m?.desnivelPos != null ? 'm' : '' },
+  { k: 'Carga', v: m?.carga != null ? String(m.carga) : '—' },
+  { k: 'Mejor km', v: m?.mejorKm ?? '—', u: m?.mejorKm ? '/km' : '' },
+  { k: 'Kcal', v: (m?.kcal ?? run.kcal) != null ? String(m?.kcal ?? run.kcal) : '—' },
+]
+const insights: Stat[] = [
+  m?.foco ? { k: 'Foco', v: FOCO[m.foco] ?? m.foco } : null,
+  m?.rendimiento ? { k: 'Rendimiento', v: REND[m.rendimiento] ?? m.rendimiento } : null,
+  m?.teAerobico != null ? { k: 'Efecto aeróbico', v: String(m.teAerobico), u: '/5' } : null,
+  m?.teAnaerobico != null ? { k: 'Efecto anaeróbico', v: String(m.teAnaerobico), u: '/5' } : null,
+  m?.tiempoTotal && m.tiempoTotal !== run.duracion ? { k: 'Tiempo total', v: m.tiempoTotal, u: 'con paradas' } : null,
+].filter((s): s is Stat => s != null)
+const lugar = run.lugar?.replace(/\s*Carrera\s*$/i, '') || null
+
+const fullLaps = run.laps.filter((l) => l.km >= 0.95)
+const paces = fullLaps.map((l) => parsePace(l.ritmo)).filter((p) => p > 0)
+const hrs = fullLaps.map((l) => l.fcMedia).filter((h): h is number => h != null)
+const bestPace = paces.length > 1 ? Math.min(...paces) : null
+const worstPace = paces.length > 1 && bestPace != null ? Math.max(...paces) : null
+const bestHr = hrs.length > 1 ? Math.min(...hrs) : null
+const worstHr = hrs.length > 1 && bestHr != null ? Math.max(...hrs) : null
+const paceMark = (l: (typeof run.laps)[number]) => {
+  const p = parsePace(l.ritmo)
+  if (bestPace != null && worstPace != null && bestPace !== worstPace) {
+    if (p === bestPace) return 'best'
+    if (p === worstPace) return 'worst'
+  }
+  return undefined
+}
+const hrMark = (l: (typeof run.laps)[number]) => {
+  const h = l.fcMedia
+  if (h == null || bestHr == null || worstHr == null || bestHr === worstHr) return undefined
+  if (h === bestHr) return 'best'
+  if (h === worstHr) return 'worst'
+  return undefined
+}
+---
+
+<Layout title={`${run.nombre} · ${run.fecha} · midu.run`} description={`${run.nombre} ${run.km.toFixed(1)} km a ${run.ritmo}/km`}>
+  <main class="app" data-mode="coach">
+    <div class="chrome">
+      <Topbar connected={connected} />
+    </div>
+    <div class="shell">
+      <div class="content">
+        <div class="stack">
+          <article class="run">
+            <a class="back" href="/">← Entrenamientos</a>
+            <p class="label">{day} · COROS</p>
+            <h1>{run.nombre}</h1>
+            {lugar && <p class="place">{lugar}</p>}
+
+            <ul class="hero">
+              {
+                hero.map((s) => (
+                  <li>
+                    <span>{s.k}</span>
+                    <b class="pixel">
+                      {s.v}
+                      {s.u && <small>{s.u}</small>}
+                    </b>
+                  </li>
+                ))
+              }
+            </ul>
+
+            {run.track.length > 1 && <RunMap track={run.track} />}
+
+            <ul class="extra">
+              {
+                extra.map((s) => (
+                  <li>
+                    <span>{s.k}</span>
+                    <b class="pixel">
+                      {s.v}
+                      {s.u && <small>{s.u}</small>}
+                    </b>
+                  </li>
+                ))
+              }
+            </ul>
+
+            {
+              insights.length > 0 && (
+                <ul class="extra insights">
+                  {insights.map((s) => (
+                    <li>
+                      <span>{s.k}</span>
+                      <b class="pixel">
+                        {s.v}
+                        {s.u && <small>{s.u}</small>}
+                      </b>
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+
+            <RunCharts series={run.series} laps={run.laps} ritmo={run.ritmo} fcMedia={run.fcMedia} />
+
+            <Team runId={run.id} who={['entrenador']} label="Opinión del entrenador · esta sesión" />
+
+            {
+              run.laps.length > 0 && (
+                <section class="laps">
+                  <p class="label">Vueltas · 1 km</p>
+                  <ol>
+                    {run.laps.map((l) => (
+                      <li>
+                        <span class="pixel n">{l.n}</span>
+                        <span class="pixel km">{l.km.toFixed(2)}<small> km</small></span>
+                        <span class:list={['pixel', 'pace', paceMark(l)]}>{l.ritmo}<small>/km</small></span>
+                        <span class:list={['pixel', 'hr', hrMark(l)]}>{l.fcMedia ?? '—'}<small> bpm</small></span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              )
+            }
+          </article>
+        </div>
+      </div>
+      <Chat
+        runId={run.id}
+        hint="Habla de esta sesión: ritmo, vueltas y cómo encaja con Valencia."
+        suggestions={['¿Fue un ritmo sostenible?', '¿Qué dices de las vueltas?', '¿Cómo encaja esto con Valencia?']}
+      />
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .app {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chrome {
+    flex-shrink: 0;
+    padding: 0 1.25rem;
+  }
+  .shell {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .content {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 1.25rem 2rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+  .shell > :global(#chat) {
+    min-width: 3.25rem;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .stack {
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+  .run {
+    padding: 2rem 0 2.5rem;
+  }
+  .back {
+    display: inline-block;
+    margin: 0 0 1.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .back:hover {
+    color: var(--fg);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2rem, 6vw, 3.4rem);
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+  }
+  .place {
+    margin: 0.65rem 0 0;
+    color: var(--muted);
+  }
+  .hero,
+  .extra {
+    list-style: none;
+    margin: 2rem 0 0;
+    padding: 0;
+    display: grid;
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+  .hero {
+    grid-template-columns: repeat(4, 1fr);
+    margin-bottom: 2.5rem;
+  }
+  .extra {
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 0;
+  }
+  .hero li,
+  .extra li {
+    display: grid;
+    gap: 0.4rem;
+    padding: 1rem 1.1rem 1.15rem;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero span,
+  .extra span {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .hero b,
+  .extra b {
+    font-size: clamp(1.2rem, 2.6vw, 1.7rem);
+    font-weight: 500;
+    line-height: 1;
+  }
+  .hero small,
+  .extra small {
+    margin-left: 0.2rem;
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+  .insights {
+    border-top: 0;
+  }
+  .laps {
+    padding: 2.5rem 0 0;
+    border-top: 1px solid var(--line);
+    margin-top: 2.5rem;
+  }
+  .laps ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .laps li {
+    display: grid;
+    grid-template-columns: 2rem 1fr 5.5rem 5rem;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .laps .n {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  .laps .km,
+  .laps .pace,
+  .laps .hr {
+    text-align: right;
+    font-size: 1rem;
+  }
+  .laps small {
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+  .laps .best {
+    color: var(--ok);
+  }
+  .laps .worst {
+    color: #ff4b6e;
+  }
+  @media (max-width: 960px) {
+    .app {
+      height: auto;
+      overflow: visible;
+    }
+    .shell {
+      display: flex;
+      flex-direction: column;
+      flex: none;
+      overflow: visible;
+    }
+    .content {
+      overflow: visible;
+    }
+    .shell :global(#chat) {
+      width: 100%;
+      min-width: 0;
+      height: min(70vh, 36rem);
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+  }
+  @media (max-width: 720px) {
+    .hero,
+    .extra {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 600px) {
+    .laps li {
+      grid-template-columns: 2rem 1fr 4.75rem 4.25rem;
+    }
+  }
+</style>

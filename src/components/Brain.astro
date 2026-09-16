@@ -1,0 +1,263 @@
+---
+// Estado del agente (appState + sesión en disco) y memoria a largo plazo (ficheros markdown del FileMemoryStore).
+// Ambos se leen del servidor por /api/brain; el chat avisa (evento coach:turn) para refrescar tras cada turno.
+---
+
+<section class="brain" id="brain">
+  <div class="head">
+    <p class="label">Cerebro del coach · estado y memoria</p>
+    <div class="actions">
+      <button class="btn ghost" id="brain-refresh" type="button" hidden>Actualizar</button>
+      <button class="pixel toggle" id="brain-toggle" type="button" aria-expanded="false" aria-controls="brain-cols">ver</button>
+    </div>
+  </div>
+  <div class="cols" id="brain-cols" hidden>
+    <article class="col">
+      <p class="pixel sub">Estado del agente <span class="tip" title="agent.appState: datos que el modelo no ve en el contexto; los escriben las tools y la app. Se guardan con el snapshot de la sesión.">appState</span></p>
+      <dl class="kv" id="brain-state">
+        <div><dt>turnos</dt><dd>…</dd></div>
+      </dl>
+      <p class="pixel sub">Preferencias <span class="tip" title="Las guarda la tool guardar_preferencia cuando se lo cuentas al coach.">tool</span></p>
+      <ul class="prefs" id="brain-prefs"><li class="empty">Dile al coach cosas como "mi tirada larga es el domingo".</li></ul>
+      <p class="pixel sub">Sesión <span class="tip" title="SessionManager + LocalFileStorage: snapshot del agente en disco tras cada invocación. Si reinicias el servidor, el chat sigue.">disco</span></p>
+      <p class="path" id="brain-session">…</p>
+    </article>
+    <article class="col">
+      <p class="pixel sub">Memoria a largo plazo <span class="tip" title="MemoryManager + FileMemoryStore: tras cada turno un extractor saca hechos duraderos y los guarda en markdown. Al empezar cada turno se inyectan los relevantes.">FileMemoryStore</span></p>
+      <div class="mem" id="brain-memory"><p class="empty">Todavía no recuerda nada. Cuéntale algo al coach (una molestia, un viaje) y vuelve en unos segundos.</p></div>
+      <p class="path" id="brain-memory-path">…</p>
+    </article>
+  </div>
+</section>
+
+<script>
+  type Brain = {
+    estado: { preferencias: Record<string, string>; turnos: number; ultimaConsulta: string | null; mensajes: number }
+    sesion: { id: string; ruta: string; mensajes: number }
+    memoria: { ruta: string; entradas: { file: string; titulo: string; hechos: string[]; actualizado: string }[] }
+  }
+  const stateEl = document.getElementById('brain-state')!
+  const prefsEl = document.getElementById('brain-prefs')!
+  const sessionEl = document.getElementById('brain-session')!
+  const memEl = document.getElementById('brain-memory')!
+  const memPathEl = document.getElementById('brain-memory-path')!
+  const btn = document.getElementById('brain-refresh') as HTMLButtonElement
+  const toggle = document.getElementById('brain-toggle') as HTMLButtonElement
+  const cols = document.getElementById('brain-cols')!
+  let open = false
+  let loaded = false
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : '—')
+  let lastKey = ''
+
+  function render(b: Brain) {
+    stateEl.innerHTML = [
+      ['turnos', String(b.estado.turnos)],
+      ['última consulta', fmtTime(b.estado.ultimaConsulta)],
+      ['mensajes en sesión', String(b.sesion.mensajes)],
+    ]
+      .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
+      .join('')
+    const prefs = Object.entries(b.estado.preferencias)
+    prefsEl.innerHTML = prefs.length
+      ? prefs.map(([k, v]) => `<li><span class="pixel k">${esc(k)}</span> ${esc(v)}</li>`).join('')
+      : '<li class="empty">Dile al coach cosas como "mi tirada larga es el domingo".</li>'
+    sessionEl.textContent = `${b.sesion.ruta}/`
+    memPathEl.textContent = `${b.memoria.ruta}/ · ${b.memoria.entradas.length} fichero${b.memoria.entradas.length === 1 ? '' : 's'}`
+    const key = JSON.stringify(b.memoria.entradas)
+    if (key !== lastKey) {
+      const changed = lastKey !== ''
+      lastKey = key
+      memEl.innerHTML = b.memoria.entradas.length
+        ? b.memoria.entradas
+            .map(
+              (e) => `<article class="entry"><h4 class="pixel">${esc(e.titulo)}</h4><ul>${e.hechos.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></article>`,
+            )
+            .join('')
+        : '<p class="empty">Todavía no recuerda nada. Cuéntale algo al coach (una molestia, un viaje) y vuelve en unos segundos.</p>'
+      if (changed) {
+        memEl.classList.add('flash')
+        setTimeout(() => memEl.classList.remove('flash'), 1200)
+      }
+    }
+  }
+
+  async function load() {
+    btn.disabled = true
+    try {
+      const res = await fetch('/api/brain')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      render(data)
+    } catch (err) {
+      sessionEl.textContent = (err as Error).message
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  btn.addEventListener('click', load)
+  // Plegado por defecto: se carga la primera vez que se abre
+  toggle.addEventListener('click', () => {
+    open = !open
+    cols.hidden = !open
+    btn.hidden = !open
+    toggle.textContent = open ? 'ocultar' : 'ver'
+    toggle.setAttribute('aria-expanded', String(open))
+    if (open && !loaded) {
+      loaded = true
+      load()
+    }
+  })
+  // Tras cada turno del chat: la extracción de memoria corre en segundo plano, así que reintentamos unos segundos
+  document.addEventListener('coach:turn', () => {
+    if (!open) return
+    load()
+    ;[3000, 8000, 15000].forEach((ms) => setTimeout(load, ms))
+  })
+</script>
+
+<style>
+  .brain {
+    padding: 2.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .toggle {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--faint);
+  }
+  .toggle:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+  .cols[hidden],
+  .btn[hidden] {
+    display: none;
+  }
+  .col {
+    min-width: 0;
+  }
+  .sub {
+    margin: 0 0 0.5rem;
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .sub + .sub,
+  .kv + .sub,
+  .prefs + .sub {
+    margin-top: 1.25rem;
+  }
+  .tip {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.3rem;
+    border: 1px solid var(--line);
+    color: var(--faint);
+    text-transform: none;
+    cursor: help;
+  }
+  .kv {
+    margin: 0;
+    display: grid;
+    gap: 0.3rem;
+  }
+  .kv :global(div) {
+    display: grid;
+    grid-template-columns: 9rem 1fr;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+  }
+  .kv :global(dt) {
+    color: var(--faint);
+  }
+  .kv :global(dd) {
+    margin: 0;
+  }
+  .prefs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .prefs :global(.k) {
+    display: inline-block;
+    margin-right: 0.35rem;
+    padding: 0.05rem 0.35rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    font-size: 0.6rem;
+    color: var(--muted);
+  }
+  .path {
+    margin: 0;
+    font-size: 0.7rem;
+    color: var(--faint);
+    overflow-wrap: anywhere;
+  }
+  :global(.empty) {
+    color: var(--faint);
+    font-size: 0.8rem;
+  }
+  .mem {
+    display: grid;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+    transition: background 0.4s;
+  }
+  .mem.flash :global(.entry) {
+    border-color: var(--ok);
+  }
+  .mem :global(.entry) {
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--ok);
+    transition: border-color 0.4s;
+  }
+  .mem :global(h4) {
+    margin: 0 0 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .mem :global(ul:empty) {
+    display: none;
+  }
+  .mem :global(ul) {
+    margin: 0;
+    padding-left: 1rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+  }
+  .mem :global(li) {
+    margin: 0.1rem 0;
+  }
+  @media (max-width: 720px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

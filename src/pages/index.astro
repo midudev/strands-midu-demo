@@ -1,11 +1,130 @@
 ---
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
+import Layout from '../layouts/Layout.astro'
+import Topbar from '../components/Topbar.astro'
+import Hero from '../components/Hero.astro'
+import Stats from '../components/Stats.astro'
+import Briefing from '../components/Briefing.astro'
+import Brain from '../components/Brain.astro'
+import Team from '../components/Team.astro'
+import Runs from '../components/Runs.astro'
+import Races from '../components/Races.astro'
+import Chat from '../components/Chat.astro'
+import { isCorosConnected } from '../agent/coros/auth'
+import { getDashboard, type Dashboard } from '../agent/coros/data'
+import { featuredRaces, getRaces, type Race } from '../lib/races'
+import { loadPredictions } from '../lib/predictions'
 
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+export const prerender = false
+
+const connected = isCorosConnected()
+const corosStatus = Astro.url.searchParams.get('coros')
+
+// Datos de COROS (llamadas MCP directas, sin LLM) y carreras (scraping cacheado), en paralelo
+const [dashboard, racesResult] = await Promise.all([
+  connected ? getDashboard().catch((err): Dashboard => ({ fitness: null, recovery: null, load: [], runs: [], errores: [String(err.message ?? err)] })) : null,
+  connected ? getRaces().catch(() => ({ fetchedAt: null, races: [] as Race[] })) : null,
+])
+const predictions = connected ? loadPredictions() : {}
 ---
 
 <Layout>
-	<Welcome />
+  <main class="app" data-mode={connected && dashboard && racesResult ? 'coach' : 'hero'}>
+    <div class="chrome">
+      <Topbar connected={connected} />
+      {corosStatus === 'error' && <p class="pixel flash warn">No se pudo conectar con COROS ({Astro.url.searchParams.get('motivo')}). Prueba de nuevo.</p>}
+    </div>
+
+    {
+      connected && dashboard && racesResult ? (
+        <div class="shell">
+          <div class="content">
+            <div class="stack">
+              <Stats data={dashboard} />
+              {dashboard.errores.length > 0 && <p class="pixel flash warn">COROS: {dashboard.errores.join(' · ')}</p>}
+              <Briefing runs={dashboard.runs} />
+              <Team />
+              <Brain />
+              <Runs runs={dashboard.runs} />
+              <Races races={featuredRaces(racesResult.races)} predictions={predictions} connected={connected} fetchedAt={racesResult.fetchedAt} />
+            </div>
+          </div>
+          <Chat />
+        </div>
+      ) : (
+        <Hero />
+      )
+    }
+  </main>
 </Layout>
+
+<style>
+  .app[data-mode='hero'] {
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 0 1rem 2rem;
+  }
+  .app[data-mode='coach'] {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .app[data-mode='coach'] .chrome {
+    flex-shrink: 0;
+    padding: 0 1.25rem;
+  }
+  .shell {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .content {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 1.25rem 2rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+  .shell > :global(#chat) {
+    min-width: 3.25rem;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .stack {
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+  .flash {
+    margin: 1rem 0 0;
+    font-size: 0.7rem;
+  }
+  .flash.warn {
+    color: var(--warn);
+  }
+  @media (max-width: 960px) {
+    .app[data-mode='coach'] {
+      height: auto;
+      overflow: visible;
+    }
+    .shell {
+      display: flex;
+      flex-direction: column;
+      flex: none;
+      overflow: visible;
+    }
+    .content {
+      overflow: visible;
+    }
+    .shell :global(#chat) {
+      width: 100%;
+      min-width: 0;
+      height: min(70vh, 36rem);
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+  }
+</style>

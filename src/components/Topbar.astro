@@ -1,0 +1,121 @@
+---
+interface Props {
+  connected: boolean
+}
+const { connected } = Astro.props
+---
+
+<header class="top">
+  <div class="left">
+    <a href="/" class="pixel brand">midu.run<span>/coach</span></a>
+    <a href="/slides" class="pixel slides">slides</a>
+    <a href="/debug" class="pixel debug">debug</a>
+    <a class="pixel aws" href="https://aws.amazon.com/" target="_blank" rel="noopener">
+      <span>Taller con</span>
+      <img src="/aws.png" alt="AWS" width="48" height="48" />
+    </a>
+  </div>
+  <nav>
+    {
+      connected ? (
+        <form method="post" action="/api/auth/coros/logout">
+          <span class="pixel status"><i></i>COROS</span>
+          <button class="btn ghost" type="submit">Desconectar</button>
+        </form>
+      ) : (
+        <a class="btn" href="/api/auth/coros/login">
+          <img src="/coros.png" alt="" width="20" height="20" />
+          Conectar COROS
+        </a>
+      )
+    }
+  </nav>
+</header>
+
+<style>
+  .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .brand {
+    text-decoration: none;
+    font-size: 1rem;
+  }
+  .slides,
+  .debug {
+    text-decoration: none;
+    font-size: 0.65rem;
+    color: var(--faint);
+  }
+  .slides {
+    color: var(--muted);
+  }
+  .slides:hover {
+    color: var(--accent);
+  }
+  .debug:hover {
+    color: var(--muted);
+  }
+  .aws {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--line);
+    text-decoration: none;
+    font-size: 1.05rem;
+    line-height: 1;
+    text-transform: uppercase;
+    color: var(--fg);
+  }
+  .aws img {
+    display: block;
+    height: 3.25em;
+    width: auto;
+    /* wordmark cuadrado: letras al centro óptico, sonrisa colgando */
+    margin-block: -1em;
+    transform: translateY(0.28em);
+  }
+  @media (max-width: 480px) {
+    .aws span {
+      display: none;
+    }
+    .aws {
+      padding-left: 0.75rem;
+    }
+    .aws img {
+      height: 2.25em;
+      margin-block: -0.7em;
+    }
+  }
+  .brand span {
+    color: var(--accent);
+  }
+  form {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .status i {
+    width: 8px;
+    height: 8px;
+    background: var(--ok);
+    box-shadow: 0 0 12px var(--ok);
+  }
+</style>
