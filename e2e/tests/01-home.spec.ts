@@ -115,7 +115,7 @@ test.describe('Portada con COROS conectado', () => {
     await expect(brain.locator('#brain-state')).toContainText('turnos')
     await expect(brain.locator('#brain-state')).toContainText('mensajes en sesión')
     await expect(brain.locator('#brain-session')).toContainText('data/strands/sessions/coach-chat')
-    await expect(brain.locator('#brain-memory-path')).toContainText('data/strands/memory/midu')
+    await expect(brain.locator('#brain-memory-path')).toContainText('data/strands/memory/runner')
   })
 
   test('sin JavaScript de más: la portada carga rápido y sin errores de consola', async ({ page }) => {

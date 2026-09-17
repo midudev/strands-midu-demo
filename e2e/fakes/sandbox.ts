@@ -55,6 +55,20 @@ export function seedAuth() {
   })
 }
 
+/** Perfil del corredor ya creado: la portada arranca en modo coach sin pasar por la bienvenida. */
+export const RUNNER = {
+  nombre: 'midu',
+  ciudad: 'Barcelona',
+  objetivo: { carrera: 'Maratón de Valencia', fecha: '2026-12-06', distanciaKm: 42.195, tiempo: '2:55:00' },
+  diasPorSemana: 7,
+  notas: [],
+  creado: '2026-09-01T08:00:00.000Z',
+}
+
+export function seedRunner() {
+  writeJson(`${SANDBOX}/data/runner.json`, RUNNER)
+}
+
 /** Caché de carreras fresca: así la app no intenta scrapear xipgroc.cat. */
 export function seedRaces() {
   writeJson(`${SANDBOX}/data/races.json`, { fetchedAt: new Date().toISOString(), races: RACES })
@@ -64,6 +78,7 @@ export function seedSandbox() {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   seedAuth()
+  seedRunner()
   seedRaces()
   writeJson(`${SANDBOX}/data/tracks/${TRACKED_RUN_ID}.json`, fakeTrack())
 }

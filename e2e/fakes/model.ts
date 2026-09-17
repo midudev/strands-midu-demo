@@ -91,7 +91,7 @@ export function fakeBriefing() {
       km: kms[i],
       resumen: `${kms[i]} km ${tipo}`,
     })),
-    diasParaValencia: Math.round((Date.parse('2026-12-06') - Date.parse(hoy())) / 86400_000),
+    diasParaObjetivo: Math.round((Date.parse('2026-12-06') - Date.parse(hoy())) / 86400_000),
   }
 }
 
@@ -114,7 +114,7 @@ function fakePrediction(raceId: string) {
     recomendacion: 'tempo',
     motivo: 'Predicción de prueba: 30 s por encima de la estimación de COROS por la carga reciente.',
     claves: ['Salir conservador', 'Negative split', 'Gel en el km 6'],
-    encajeConValencia: 'Sirve como tempo largo dentro del bloque específico.',
+    encajeConObjetivo: 'Sirve como tempo largo dentro del bloque específico.',
   }
 }
 
@@ -192,7 +192,7 @@ function decide(messages: Message[], options?: StreamOptions): Reply {
 
   // 4. Resumen del historial (SummarizingConversationManager)
   if (system.includes('Resume esta conversación')) {
-    return { text: '- Resumen de prueba: midu preguntó por la sesión y el coach respondió con datos (mock).' }
+    return { text: '- Resumen de prueba: el corredor preguntó por la sesión y el coach respondió con datos (mock).' }
   }
 
   // 5. Especialistas del equipo (opinión diaria, por sesión o como tool del coach)
@@ -211,10 +211,32 @@ function decide(messages: Message[], options?: StreamOptions): Reply {
     }
   }
 
-  // 6. El coach del chat (portada y /runs/:id)
+  // 6. La bienvenida: pregunta hasta que el corredor se presenta, entonces guarda el perfil y se despide
+  if (system.includes('Eres el coach de running que da la bienvenida')) {
+    if (called.includes('guardar_perfil')) return { text: 'Perfecto, Ana. Ya tengo todo para prepararte el panel. Vamos a por esa media.' }
+    if (lower.includes('me llamo') && tools.has('guardar_perfil')) {
+      return {
+        tools: [
+          {
+            name: 'guardar_perfil',
+            input: {
+              nombre: 'Ana',
+              ciudad: 'Barcelona',
+              objetivo: { carrera: 'Mitja Marató de Barcelona', fecha: addDays(120), distanciaKm: 21.0975, tiempo: '1:45:00' },
+              diasPorSemana: 4,
+              notas: ['Molestia en el sóleo derecho (mock)'],
+            },
+          },
+        ],
+      }
+    }
+    return { text: 'Encantado. ¿Cómo te llamas y qué carrera preparas?' }
+  }
+
+  // 7. El coach del chat (portada y /runs/:id)
   if (lower.includes('molestia') || lower.includes('dolor') || lower.includes('fisio')) {
     if (!called.includes('fisio') && tools.has('fisio')) {
-      return { tools: [{ name: 'fisio', input: { input: `midu dice: ${user}` } }] }
+      return { tools: [{ name: 'fisio', input: { input: `el corredor dice: ${user}` } }] }
     }
     return { text: 'Ahí lo tienes: hoy trote suave y mañana vemos.' }
   }

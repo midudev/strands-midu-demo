@@ -1,4 +1,4 @@
-import { seedAuth, seedRaces } from '../fakes/sandbox'
+import { seedAuth, seedRaces, seedRunner } from '../fakes/sandbox'
 import { expect, test } from '../fixtures'
 
 test.describe('Página /debug', () => {
@@ -59,6 +59,7 @@ test.describe('Página /debug', () => {
     // Deja el sandbox como al principio para los tests que vienen detrás
     test.afterAll(() => {
       seedAuth()
+      seedRunner()
       seedRaces()
     })
 

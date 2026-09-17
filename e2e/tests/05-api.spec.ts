@@ -57,7 +57,7 @@ test.describe('API (sin navegador)', () => {
     const body = (await res.json()) as { estado: { turnos: number }; sesion: { id: string; ruta: string }; memoria: { ruta: string } }
     expect(body.estado.turnos).toBeGreaterThan(0)
     expect(body.sesion).toMatchObject({ id: 'coach-chat', ruta: 'data/strands/sessions/coach-chat' })
-    expect(body.memoria.ruta).toBe('data/strands/memory/midu')
+    expect(body.memoria.ruta).toBe('data/strands/memory/runner')
   })
 
   test('GET /api/briefing cachea por día y GET /api/races trae carreras y predicciones', async ({ request }) => {
