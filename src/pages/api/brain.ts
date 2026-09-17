@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { getCoachState } from '../../agent/chat'
-import { apiError, requireCoros } from '../../lib/api'
+import { apiError, requireReady } from '../../lib/api'
 import { listMemory, MEMORY_DIR, STRANDS_DIR } from '../../lib/memory-files'
 
 export const prerender = false
@@ -15,8 +15,8 @@ export const prerender = false
  * - memoria: los hechos a largo plazo que ha extraído el MemoryManager (ficheros markdown).
  */
 export const GET: APIRoute = async () => {
-  const notConnected = requireCoros()
-  if (notConnected) return notConnected
+  const notReady = requireReady()
+  if (notReady) return notReady
 
   try {
     const estado = await getCoachState()

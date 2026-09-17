@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { dailyBriefing } from '../../agent/briefing'
-import { apiError, requireCoros } from '../../lib/api'
+import { apiError, requireReady } from '../../lib/api'
 
 export const prerender = false
 
@@ -12,8 +12,8 @@ export const prerender = false
  * con ?refresh se vuelve a generar aunque ya exista el de hoy.
  */
 export const GET: APIRoute = async ({ url }) => {
-  const notConnected = requireCoros()
-  if (notConnected) return notConnected
+  const notReady = requireReady()
+  if (notReady) return notReady
 
   const refresh = url.searchParams.has('refresh')
 

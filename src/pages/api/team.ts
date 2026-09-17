@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro'
 
 import { isSpecialist, SPECIALISTS } from '../../agent/prompts/team'
 import { streamSpecialistTake } from '../../agent/team'
-import { ndjson, requireCoros, runIdOf } from '../../lib/api'
+import { ndjson, requireReady, runIdOf } from '../../lib/api'
 
 export const prerender = false
 
@@ -17,8 +17,8 @@ export const prerender = false
  *   - cached: solo devuelve lo que ya haya guardado; si no hay nada, responde "idle".
  */
 export const GET: APIRoute = async ({ url }) => {
-  const notConnected = requireCoros()
-  if (notConnected) return notConnected
+  const notReady = requireReady()
+  if (notReady) return notReady
 
   const who = url.searchParams.get('who')
 

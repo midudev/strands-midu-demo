@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { streamPrediction } from '../../agent/swarm'
-import { ndjson, requireCoros } from '../../lib/api'
+import { ndjson, requireReady } from '../../lib/api'
 import { getRaces } from '../../lib/races'
 
 export const prerender = false
@@ -18,8 +18,8 @@ interface PredictBody {
  * Tipos de evento: node_start, tool_start, tool_end, handoff, result, error.
  */
 export const POST: APIRoute = async ({ request }) => {
-  const notConnected = requireCoros()
-  if (notConnected) return notConnected
+  const notReady = requireReady()
+  if (notReady) return notReady
 
   const body = (await request.json().catch(() => ({}))) as PredictBody
 

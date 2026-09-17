@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 
-import { requireCoros } from '../../lib/api'
+import { requireReady } from '../../lib/api'
 import { loadPredictions } from '../../lib/predictions'
 import { getRaces } from '../../lib/races'
 
@@ -13,8 +13,8 @@ export const prerender = false
  * indexadas por raceId. Con ?refresh se vuelve a scrapear.
  */
 export const GET: APIRoute = async ({ url }) => {
-  const notConnected = requireCoros()
-  if (notConnected) return notConnected
+  const notReady = requireReady()
+  if (notReady) return notReady
 
   const refresh = url.searchParams.has('refresh')
   const races = await getRaces({ refresh })
