@@ -4,7 +4,7 @@
 <img width="2988" height="1696" alt="CleanShot 2026-09-17 at 09 30 14@2x" src="https://github.com/user-attachments/assets/6d154660-b339-47cd-8a5b-d72a05c3826c" />
 
 
-Coach personal de running hecho con [Strands Agents](https://strandsagents.com/) (TypeScript) y Astro. Lee los entrenamientos, la forma y la recuperación de midu desde el **MCP oficial de COROS**, scrapea las próximas carreras de **xipgroc.cat** y predice cómo las haría. Todo en una web minimalista (Geist + Geist Pixel, modo oscuro).
+Coach personal de running hecho con [Strands Agents](https://strandsagents.com/) (TypeScript) y Astro. Lee los entrenamientos, la forma y la recuperación del corredor desde el **MCP oficial de COROS**, scrapea las próximas carreras de **xipgroc.cat** y predice cómo las haría. Todo en una web minimalista (Geist + Geist Pixel, modo oscuro).
 
 Es el proyecto de un taller: sirve para explicar Strands paso a paso. Está modularizado para eso: `src/agent/*.ts` contiene solo Strands; el resto es fontanería preparada.
 
@@ -25,7 +25,8 @@ Modelo: OpenAI **GPT 5.6 Luna** (`OPENAI_MODEL`, por defecto `gpt-5.6-luna`) a t
 
 | Bloque | Cómo funciona |
 |---|---|
-| Stats (VO2max, umbral, predicción maratón vs objetivo 2:55, recuperación, carga, km) | Llamadas directas al `McpClient` de COROS y parseo del texto (`src/agent/coros/data.ts`) |
+| Bienvenida (sin perfil) | El mismo chat, centrado, con un agente que entrevista al corredor (nombre, carrera objetivo, tiempo, días por semana) y guarda `data/runner.json` con la tool `guardar_perfil`. Todos los prompts, guardrails y la portada salen de ese perfil |
+| Stats (VO2max, umbral, predicción de la distancia objetivo vs tiempo objetivo, recuperación, carga, km) | Llamadas directas al `McpClient` de COROS y parseo del texto (`src/agent/coros/data.ts`) |
 | Briefing del día | `Agent.invoke` con `structuredOutputSchema` (`Briefing`), cacheado por día en `data/briefing.json` |
 | Últimos 7 días | `querySportRecords` parseado |
 | Próximas carreras | Scraping de xipgroc.cat con cheerio, caché 6 h en `data/races.json` |
@@ -59,7 +60,7 @@ Regla del proyecto: **`src/agent/*.ts` es Strands** (lo que se escribe en el tal
 1. **Corrige inputs**: si el agente pide entrenamientos sin códigos de deporte, el hook mete los de running y limita el número.
 2. **Sin datos no hay predicción**: no se puede guardar una predicción sin haber consultado `queryFitnessAssessmentOverview` en esa invocación.
 3. **No vendas humo**: la predicción no puede ser más rápida que la de COROS para esa distancia (interpolando con Riegel si no es estándar).
-4. **Valencia es el objetivo**: nada de "competir" ≥10 km en las 3 semanas previas ni 2 posteriores al maratón.
+4. **La carrera objetivo manda**: nada de "competir" ≥10 km en las semanas previas ni posteriores a la carrera del perfil (3 y 2 semanas si es un maratón).
 5. **Observabilidad**: cada tool queda registrada en `invocationState.toolsUsadas` y la web lo muestra.
 
 ### Multi-agente
@@ -94,7 +95,7 @@ src/agent/              STRANDS: lo que se escribe en el taller
   coros/client.ts       McpClient de COROS + llamadas directas
   coros/auth.ts         OAuthClientProvider persistido en .coros/auth.json
   coros/data.ts         parsers del texto de COROS → tipos
-  prompts/              coach.ts, team.ts, swarm.ts, memory.ts (solo texto)
+  prompts/              coach.ts, team.ts, swarm.ts, memory.ts, onboarding.ts (solo texto; todos salen del perfil)
 src/lib/                FONTANERÍA sin Strands
   running.ts            VALENCIA, tiempos, baseline de COROS (Riegel), reglas de una predicción
   predictions.ts        almacén data/predictions.json (+ recorrido del swarm)
@@ -111,7 +112,8 @@ src/lib/                FONTANERÍA sin Strands
 src/pages/api/          auth/coros/{login,callback,logout}, races, predict, briefing, chat, context, brain, team, debug
 src/components/         Topbar, Hero, Stats, Briefing, Brain, Team, Runs, Races, Chat, RunMap, RunCharts
 data/                   races.json, predictions.json, briefing.json, team*.json (generados)
-data/strands/           sessions/ (snapshots) y memory/midu/*.md
+data/runner.json        el perfil del corredor (lo crea la bienvenida)
+data/strands/           sessions/ (snapshots) y memory/runner/*.md
 ```
 
 ## Tests e2e (sin gastar tokens)
