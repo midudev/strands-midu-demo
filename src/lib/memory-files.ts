@@ -5,8 +5,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 /** Raíz de todo lo que Strands persiste (sesiones y memoria). */
 export const STRANDS_DIR = 'data/strands'
 
-/** Nombre del store de memoria: una única persona, midu. */
-export const MEMORY_STORE = 'midu'
+/** Nombre del store de memoria: una única persona, el corredor del perfil (data/runner.json). */
+export const MEMORY_STORE = 'runner'
 
 export const MEMORY_DIR = `${STRANDS_DIR}/memory/${MEMORY_STORE}`
 

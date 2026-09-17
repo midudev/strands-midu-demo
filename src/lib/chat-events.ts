@@ -5,6 +5,7 @@ import type { AgentStreamEvent } from '@strands-agents/sdk'
 import { mcpText } from '../agent/coros/client'
 
 import type { ContextInfo } from './chat-history'
+import type { RunnerProfile } from './runner'
 import { errText, isInternalTool, textDelta } from './stream'
 import { trace } from './trace'
 
@@ -16,6 +17,8 @@ export type ChatChunk =
   | { type: 'agent_text'; id: string; text: string }
   | { type: 'agent_end'; id: string; name: string; ms: number; ok: boolean }
   | { type: 'context'; context: ContextInfo; cayeron: number }
+  /** Solo en la bienvenida: este turno ha guardado el perfil del corredor */
+  | { type: 'profile'; runner: RunnerProfile }
   | { type: 'done' }
 
 /** Más allá de esto, la salida de una tool se recorta antes de mandarla al navegador. */

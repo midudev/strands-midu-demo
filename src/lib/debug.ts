@@ -11,10 +11,11 @@ import { BRIEFING_FILE } from './briefing'
 import { env } from './env'
 import { PREDICTIONS_FILE } from './predictions'
 import { RACES_FILE } from './races'
+import { RUNNER_FILE } from './runner'
 import { clearTraces, getTraces, trace, tracesMeta } from './trace'
 
 /** Ficheros de datos "principales", que /debug muestra siempre aunque no existan. */
-export const DATA_FILES = [BRIEFING_FILE, PREDICTIONS_FILE, RACES_FILE] as const
+export const DATA_FILES = [RUNNER_FILE, BRIEFING_FILE, PREDICTIONS_FILE, RACES_FILE] as const
 
 // --- Ficheros ----------------------------------------------------------------------------
 

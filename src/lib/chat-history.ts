@@ -7,7 +7,10 @@ export const CHAT_WINDOW = 12
 /** Mensajes recientes que el chat de sesión conserva intactos al resumir. */
 export const RUN_PRESERVE_RECENT = 4
 
-export type ChatKind = 'coach' | 'run'
+/** Ventana del chat de bienvenida: holgada, la entrevista entera tiene que caber. */
+export const ONBOARDING_WINDOW = 40
+
+export type ChatKind = 'coach' | 'run' | 'onboarding'
 
 export interface ContextInfo {
   manager: 'sliding-window' | 'summarizing'
@@ -38,13 +41,14 @@ export function messageText(message: MessageLike): string {
 }
 
 export function contextInfo(chat: ChatLike): ContextInfo {
-  const isSliding = chat.kind === 'coach'
+  const isSliding = chat.kind !== 'run'
+  const ventana = chat.kind === 'onboarding' ? ONBOARDING_WINDOW : CHAT_WINDOW
 
   return {
     manager: isSliding ? 'sliding-window' : 'summarizing',
     sessionId: chat.sessionId,
     mensajes: chat.agent.messages.length,
-    ventana: isSliding ? CHAT_WINDOW : null,
+    ventana: isSliding ? ventana : null,
     recientes: isSliding ? null : RUN_PRESERVE_RECENT,
     resumen: chat.summary,
   }

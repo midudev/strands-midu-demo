@@ -1,12 +1,24 @@
 // Helpers compartidos por los endpoints de src/pages/api/. Sin Strands.
 import { isCorosConnected } from '../agent/coros/auth'
 
+import { hasRunner } from './runner'
+
 /** 401 si COROS no está conectado; null si todo bien. Uso: `const notConnected = requireCoros(); if (notConnected) return notConnected` */
 export function requireCoros(): Response | null {
   if (isCorosConnected()) return null
 
   return Response.json({ error: 'COROS no conectado' }, { status: 401 })
 }
+
+/** 409 si aún no hay perfil del corredor (falta la bienvenida); null si todo bien. */
+export function requireRunner(): Response | null {
+  if (hasRunner()) return null
+
+  return Response.json({ error: 'Falta el perfil del corredor' }, { status: 409 })
+}
+
+/** COROS conectado y perfil creado: lo que necesita todo lo que no sea la propia bienvenida. */
+export const requireReady = () => requireCoros() ?? requireRunner()
 
 /** Respuesta de error JSON a partir de una excepción. */
 export function apiError(err: unknown, status = 500): Response {
