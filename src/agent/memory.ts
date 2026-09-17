@@ -7,27 +7,28 @@ import { MemoryManager } from '@strands-agents/sdk'
 import { FileMemoryStore } from '@strands-agents/sdk/vended-memory-stores/file-memory-store'
 
 import { MEMORY_STORE } from '../lib/memory-files'
+import type { RunnerProfile } from '../lib/runner'
 
 import { model } from './model'
-import { EXTRACTION_PROMPT, MEMORY_STORE_DESCRIPTION } from './prompts/memory'
+import { extractionPrompt, memoryStoreDescription } from './prompts/memory'
 import { storage } from './session'
 
 /** Cuántos recuerdos se inyectan como máximo en cada turno. */
 const MAX_INJECTED_MEMORIES = 3
 
-export function createMemory(): MemoryManager {
+export function createMemory(runner: RunnerProfile): MemoryManager {
   const store = new FileMemoryStore({
     name: MEMORY_STORE,
-    description: MEMORY_STORE_DESCRIPTION,
+    description: memoryStoreDescription(runner),
     storage,
-    extraction: { model, systemPrompt: EXTRACTION_PROMPT },
+    extraction: { model, systemPrompt: extractionPrompt(runner) },
   })
 
   return new MemoryManager({
     stores: [store],
     addToolConfig: {
       name: 'recordar',
-      description: 'Guarda en la memoria a largo plazo un hecho sobre midu que merezca recordarse en futuras conversaciones.',
+      description: `Guarda en la memoria a largo plazo un hecho sobre ${runner.nombre} que merezca recordarse en futuras conversaciones.`,
     },
     searchToolConfig: { name: 'buscar_en_memoria' },
     injection: { trigger: 'userTurn', maxEntries: MAX_INJECTED_MEMORIES },

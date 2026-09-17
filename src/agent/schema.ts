@@ -30,7 +30,7 @@ export const RacePrediction = z.object({
   recomendacion: z.enum(['competir', 'tempo', 'social', 'evitar']),
   motivo: z.string().describe('Una o dos frases: por qué ese tiempo y esa recomendación'),
   claves: z.array(z.string()).max(3).describe('Consejos concretos para el día de la carrera'),
-  encajeConValencia: z.string().describe('Cómo encaja en la preparación del Maratón de Valencia'),
+  encajeConObjetivo: z.string().describe('Cómo encaja en la preparación de la carrera objetivo'),
 })
 
 export type RacePrediction = z.infer<typeof RacePrediction>
@@ -51,16 +51,16 @@ export type BloqueSesion = z.infer<typeof BloqueSesion>
 export const DiaPlan = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   tipo: z
-    .enum(['suave', 'rodaje', 'calidad', 'tirada'])
-    .describe('suave = trote de recuperación, rodaje = fácil normal, calidad = ritmo/umbral/series, tirada = larga'),
-  km: z.number().positive().describe('Nunca 0: midu corre todos los días'),
+    .enum(['descanso', 'suave', 'rodaje', 'calidad', 'tirada'])
+    .describe('descanso = 0 km (solo si el corredor no corre ese día), suave = trote de recuperación, rodaje = fácil normal, calidad = ritmo/umbral/series, tirada = larga'),
+  km: z.number().min(0).describe('Kilómetros del día. 0 solo en un día de descanso; si el corredor corre todos los días, nunca 0'),
   resumen: z.string().max(48).describe('Muy corto, p. ej. "8 km fácil" o "12 km con 6×1000"'),
 })
 
 export type DiaPlan = z.infer<typeof DiaPlan>
 
 export const Briefing = z.object({
-  titular: z.string().max(90).describe('Una frase corta (máx. 12 palabras) sobre cómo llega midu hoy'),
+  titular: z.string().max(90).describe('Una frase corta (máx. 12 palabras) sobre cómo llega el corredor hoy'),
   semaforo: z.enum(['apretar', 'controlar', 'suave']).describe('Veredicto del día según carga y recuperación'),
   motivo: z.string().max(140).describe('Una frase con las cifras clave de COROS que justifican el semáforo'),
   sesion: z.object({
@@ -71,7 +71,27 @@ export const Briefing = z.object({
     .array(DiaPlan)
     .length(7)
     .describe('Plan de los próximos 7 días empezando HOY. El de hoy coincide con la sesión. Máximo 2 días de calidad.'),
-  diasParaValencia: z.number().int(),
+  diasParaObjetivo: z.number().int(),
 })
 
 export type Briefing = z.infer<typeof Briefing>
+
+// --- Perfil del corredor (tool guardar_perfil de la bienvenida) --------------------------
+
+export const RunnerProfileInput = z.object({
+  nombre: z.string().min(1).max(40).describe('Cómo quiere que le llamen'),
+  ciudad: z.string().max(60).nullable().describe('Dónde vive y entrena; null si no lo ha dicho'),
+  objetivo: z.object({
+    carrera: z.string().min(1).max(80).describe('Nombre de la carrera objetivo, p. ej. "Maratón de Valencia"'),
+    fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('YYYY-MM-DD. Si solo sabe el mes, el último domingo de ese mes'),
+    distanciaKm: z.number().positive().describe('42.195 maratón, 21.0975 media, 10, 5…'),
+    tiempo: tiempo.nullable().describe('Tiempo objetivo "h:mm:ss" o "mm:ss"; null si solo quiere terminarla'),
+  }),
+  diasPorSemana: z.number().int().min(1).max(7).describe('Días que corre a la semana. 7 si corre todos los días'),
+  notas: z
+    .array(z.string().max(120))
+    .max(6)
+    .describe('Lesiones, restricciones o gustos que el coach deba tener en cuenta. Vacío si no hay nada'),
+})
+
+export type RunnerProfileInput = z.infer<typeof RunnerProfileInput>

@@ -3,6 +3,7 @@
 // el input es un string y la respuesta vuelve como resultado de tool. Sus eventos llegan envueltos en toolStreamUpdateEvent.
 import { Agent, AfterToolCallEvent, TextBlock, ToolResultBlock, type ToolList } from '@strands-agents/sdk'
 
+import { requireRunnerProfile, type RunnerProfile } from '../lib/runner'
 import { isInternalTool, textDelta } from '../lib/stream'
 import { readTake, saveTake, type TeamTake } from '../lib/team-store'
 import { hoy } from '../lib/running'
@@ -25,12 +26,12 @@ import {
 
 // --- Especialistas como agentes y como tools -----------------------------------------------
 
-export function createSpecialist(specialist: Specialist): Agent {
+export function createSpecialist(specialist: Specialist, runner: RunnerProfile): Agent {
   const agent = new Agent({
     id: specialist.id,
     name: specialist.id,
     description: specialist.descripcion,
-    systemPrompt: specialist.prompt,
+    systemPrompt: specialist.prompt(runner),
     model,
     tools: corosTools(), // todos comparten el mismo McpClient: una sola conexión OAuth
     printer: false,
@@ -42,9 +43,9 @@ export function createSpecialist(specialist: Specialist): Agent {
 }
 
 /** Fisio y nutricionista como tools del coach del chat. El nombre de la tool es el id del especialista. */
-export function teamTools(): ToolList {
+export function teamTools(runner: RunnerProfile): ToolList {
   return CHAT_SPECIALISTS.map((specialist) =>
-    createSpecialist(specialist).asTool({ name: specialist.id, description: specialist.descripcion }),
+    createSpecialist(specialist, runner).asTool({ name: specialist.id, description: specialist.descripcion }),
   )
 }
 
@@ -52,7 +53,7 @@ export function teamTools(): ToolList {
  * La respuesta del especialista ya se ha pintado en el chat, con su cara, mientras la escribía.
  * Reescribimos el tool result (event.result es sustituible) para que el coach no la repita.
  */
-export function addTeamHook(agent: Agent) {
+export function addTeamHook(agent: Agent, runner: RunnerProfile) {
   agent.addHook(AfterToolCallEvent, (event) => {
     const { name, toolUseId } = event.toolUse
 
@@ -65,7 +66,7 @@ export function addTeamHook(agent: Agent) {
     event.result = new ToolResultBlock({
       toolUseId,
       status: 'success',
-      content: [new TextBlock(specialistResultForCoach(name, text))],
+      content: [new TextBlock(specialistResultForCoach(name, text, runner))],
     })
   })
 }
@@ -89,13 +90,13 @@ interface TakeOptions {
 }
 
 /** Qué le pedimos al especialista: su lectura del día, o de una sesión concreta. */
-async function buildAsk(specialist: Specialist, runId?: string): Promise<string> {
-  if (!runId) return dailyAsk(specialist)
+async function buildAsk(specialist: Specialist, runner: RunnerProfile, runId?: string): Promise<string> {
+  if (!runId) return dailyAsk(specialist, runner)
 
   const run = await getRunDetail(runId)
   if (!run) throw new Error('Sesión no encontrada')
 
-  return runAsk(specialist, runFacts(run))
+  return runAsk(specialist, runFacts(run), runner)
 }
 
 /** Opinión de un especialista en streaming. */
@@ -121,8 +122,9 @@ export async function* streamSpecialistTake(id: string, options: TakeOptions = {
   const startedAt = Date.now()
   trace('team', refresh ? `${id} opinión regenerar` : `${id} opinión generar`, { runId })
 
-  const ask = await buildAsk(specialist, runId)
-  const agent = createSpecialist(specialist)
+  const runner = requireRunnerProfile()
+  const ask = await buildAsk(specialist, runner, runId)
+  const agent = createSpecialist(specialist, runner)
 
   const toolsUsadas: string[] = []
   let opinion = ''

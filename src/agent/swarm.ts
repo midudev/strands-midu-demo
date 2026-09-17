@@ -7,6 +7,7 @@ import { Swarm } from '@strands-agents/sdk/multiagent'
 
 import { attachSwarmTrace, predictionSince, type SwarmStep } from '../lib/predictions'
 import type { Race } from '../lib/races'
+import { requireRunnerProfile, type RunnerProfile } from '../lib/runner'
 import { SwarmEventTranslator, type SwarmChunk } from '../lib/swarm-events'
 import { trace } from '../lib/trace'
 
@@ -23,7 +24,7 @@ const MAX_STEPS = 8
 
 const SWARM_TIMEOUT_MS = 240_000
 
-function createSwarmAgent(def: SwarmAgentDef): Agent {
+function createSwarmAgent(def: SwarmAgentDef, runner: RunnerProfile): Agent {
   const tools = [...corosTools(), getUpcomingRaces]
 
   // Solo el árbitro puede guardar: así nadie "cierra" la predicción antes de tiempo
@@ -33,7 +34,7 @@ function createSwarmAgent(def: SwarmAgentDef): Agent {
     id: def.id,
     name: def.id,
     description: def.descripcion, // los demás nodos ven esta descripción para decidir a quién pasar
-    systemPrompt: def.prompt,
+    systemPrompt: def.prompt(runner),
     model,
     tools,
     printer: false,
@@ -44,10 +45,10 @@ function createSwarmAgent(def: SwarmAgentDef): Agent {
   return agent
 }
 
-export function buildSwarm(): Swarm {
+export function buildSwarm(runner: RunnerProfile): Swarm {
   return new Swarm({
     id: 'prediccion',
-    nodes: SWARM_AGENTS.map(createSwarmAgent),
+    nodes: SWARM_AGENTS.map((def) => createSwarmAgent(def, runner)),
     start: 'analista',
     maxSteps: MAX_STEPS,
     // Si dos agentes se pasan el testigo entre ellos sin avanzar, el SDK corta
@@ -64,14 +65,15 @@ export async function* streamPrediction(race: Race): AsyncGenerator<SwarmChunk> 
   const startedAt = Date.now()
   trace('swarm', `prediccion ${race.nombre}`, { raceId: race.id, fecha: race.fecha })
 
-  const swarm = buildSwarm()
+  const runner = requireRunnerProfile()
+  const swarm = buildSwarm(runner)
   const translator = new SwarmEventTranslator()
 
   // El recorrido se acumula en invocationState para que las tools también puedan verlo
   const invocationState: Record<string, unknown> = { swarmSteps: translator.steps as SwarmStep[] }
 
   try {
-    for await (const event of swarm.stream(swarmAsk(race), { invocationState })) {
+    for await (const event of swarm.stream(swarmAsk(race, runner), { invocationState })) {
       yield* translator.translate(event)
     }
   } catch (err) {

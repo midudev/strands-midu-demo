@@ -25,7 +25,7 @@ export function readCoachState(appState: AppStateReader): CoachAppState {
 export const guardarPreferencia = tool({
   name: 'guardar_preferencia',
   description:
-    'Guarda una preferencia estable de midu en el estado del agente (no en la conversación): ' +
+    'Guarda una preferencia estable del corredor en el estado del agente (no en la conversación): ' +
     'día del rodaje largo, zapatillas, horario habitual, terreno favorito, etc. Clave corta en snake_case.',
   inputSchema: z.object({
     clave: z
@@ -50,7 +50,7 @@ export const guardarPreferencia = tool({
 
 export const verPreferencias = tool({
   name: 'ver_preferencias',
-  description: 'Lee las preferencias de midu guardadas en el estado del agente. Úsala antes de planificar sesiones.',
+  description: 'Lee las preferencias del corredor guardadas en el estado del agente. Úsala antes de planificar sesiones.',
   inputSchema: z.object({}),
   callback: (_input, context) => {
     const { preferencias, turnos } = readCoachState(context!.agent.appState)

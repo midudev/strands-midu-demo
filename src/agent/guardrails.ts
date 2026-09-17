@@ -8,6 +8,7 @@ import {
   type InvocationState,
 } from '@strands-agents/sdk'
 
+import { requireRunnerProfile } from '../lib/runner'
 import { motivoRechazo } from '../lib/running'
 import { isInternalTool } from '../lib/stream'
 import { trace } from '../lib/trace'
@@ -58,7 +59,7 @@ export function addGuardrails(agent: Agent) {
     // 2. Vetar una predicción que no cumple las reglas. event.cancel = motivo: la tool no se ejecuta
     //    y el modelo recibe el motivo como resultado, así que puede corregir y volver a intentarlo.
     if (name === 'save_race_prediction') {
-      const motivo = motivoRechazo(input as RacePrediction, state.fitness)
+      const motivo = motivoRechazo(input as RacePrediction, state.fitness, requireRunnerProfile().objetivo)
 
       if (motivo) {
         event.cancel = motivo

@@ -5,8 +5,10 @@ import { Agent, type ToolList } from '@strands-agents/sdk'
 import { isCorosConnected } from './coros/auth'
 import { corosClient } from './coros/client'
 import { addGuardrails } from './guardrails'
+import { requireRunnerProfile } from '../lib/runner'
+
 import { model } from './model'
-import { COACH_PROMPT } from './prompts/coach'
+import { coachPrompt } from './prompts/coach'
 import { saveRacePrediction } from './tools/predictions'
 import { getUpcomingRaces } from './tools/races'
 
@@ -20,7 +22,7 @@ export function coachTools(): ToolList {
 }
 
 /** Un coach sin memoria de conversación: para invocaciones sueltas (briefing). El chat usa getChatAgent(). */
-export function createCoach(systemPrompt = COACH_PROMPT, tools: ToolList = coachTools()): Agent {
+export function createCoach(systemPrompt = coachPrompt(requireRunnerProfile()), tools: ToolList = coachTools()): Agent {
   const coach = new Agent({
     model,
     systemPrompt,
