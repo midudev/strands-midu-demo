@@ -1,5 +1,9 @@
 # midu.run coach 🏃
 
+<img width="3006" height="1704" alt="CleanShot 2026-09-17 at 09 30 03@2x" src="https://github.com/user-attachments/assets/0bfbb11a-c3a8-4bd6-ae97-115142f767e1" />
+<img width="2988" height="1696" alt="CleanShot 2026-09-17 at 09 30 14@2x" src="https://github.com/user-attachments/assets/6d154660-b339-47cd-8a5b-d72a05c3826c" />
+
+
 Coach personal de running hecho con [Strands Agents](https://strandsagents.com/) (TypeScript) y Astro. Lee los entrenamientos, la forma y la recuperación de midu desde el **MCP oficial de COROS**, scrapea las próximas carreras de **xipgroc.cat** y predice cómo las haría. Todo en una web minimalista (Geist + Geist Pixel, modo oscuro).
 
 Es el proyecto de un taller: sirve para explicar Strands paso a paso. Está modularizado para eso: `src/agent/*.ts` contiene solo Strands; el resto es fontanería preparada.
