@@ -1,8 +1,12 @@
 ---
+import { resumenObjetivo, type RunnerProfile } from '../lib/runner'
+
 interface Props {
   connected: boolean
+  /** Perfil del corredor, si ya ha pasado por la bienvenida */
+  runner?: RunnerProfile | null
 }
-const { connected } = Astro.props
+const { connected, runner = null } = Astro.props
 ---
 
 <header class="top">
@@ -18,10 +22,21 @@ const { connected } = Astro.props
   <nav>
     {
       connected ? (
-        <form method="post" action="/api/auth/coros/logout">
-          <span class="pixel status"><i></i>COROS</span>
-          <button class="btn ghost" type="submit">Desconectar</button>
-        </form>
+        <div class="session">
+          {runner && (
+            <form method="post" action="/api/runner" class="runner" title={resumenObjetivo(runner)}>
+              <span class="pixel who">{runner.nombre}</span>
+              <span class="goal">{resumenObjetivo(runner)}</span>
+              <button class="pixel change" type="submit" title="Borrar el perfil y volver a la bienvenida">
+                cambiar
+              </button>
+            </form>
+          )}
+          <form method="post" action="/api/auth/coros/logout">
+            <span class="pixel status"><i></i>COROS</span>
+            <button class="btn ghost" type="submit">Desconectar</button>
+          </form>
+        </div>
       ) : (
         <a class="btn" href="/api/auth/coros/login">
           <img src="/coros.png" alt="" width="20" height="20" />
@@ -104,6 +119,44 @@ const { connected } = Astro.props
     display: flex;
     align-items: center;
     gap: 1rem;
+  }
+  .session {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+  .runner {
+    gap: 0.6rem;
+    padding-right: 1.25rem;
+    border-right: 1px solid var(--line);
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .runner .who {
+    color: var(--fg);
+    font-size: 0.7rem;
+  }
+  .runner .goal {
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .runner .change {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--faint);
+  }
+  .runner .change:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+  }
+  @media (max-width: 720px) {
+    .runner .goal {
+      display: none;
+    }
   }
   .status {
     display: inline-flex;

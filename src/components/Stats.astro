@@ -1,24 +1,28 @@
 ---
 import type { Dashboard } from '../agent/coros/data'
-import { toSeconds, fmtTime, VALENCIA } from '../lib/running'
+import { diasParaObjetivo, fechaCorta, nombreDistancia, type RunnerProfile } from '../lib/runner'
+import { corosPrediction, fmtTime, toSeconds } from '../lib/running'
 
 interface Props {
   data: Dashboard
+  runner: RunnerProfile
 }
-const { data } = Astro.props
+const { data, runner } = Astro.props
 const { fitness, recovery, load, runs } = data
+const { objetivo } = runner
 
-const OBJETIVO = '2:55:00'
-const media = fitness?.prediccion.media ?? null
-const maratonCoros = fitness?.prediccion.maraton ?? null
-const estimado = !maratonCoros && Boolean(media)
-const maraton =
-  maratonCoros ?? (media ? fmtTime(toSeconds(media) * Math.pow(42.195 / 21.0975, 1.06)) : null)
-const delta = maraton ? toSeconds(maraton) - toSeconds(OBJETIVO) : null
+// Predicción de COROS para la distancia objetivo (interpolada con Riegel si no es una distancia estándar)
+const prediccion = fitness ? corosPrediction(fitness, objetivo.distanciaKm) : null
+const estimado = prediccion !== null && !prediccion.exact
+const tiempoCoros = prediccion ? fmtTime(prediccion.seconds) : null
+const distancia = nombreDistancia(objetivo.distanciaKm)
+const tituloDistancia = distancia.charAt(0).toUpperCase() + distancia.slice(1)
+const delta = prediccion && objetivo.tiempo ? prediccion.seconds - toSeconds(objetivo.tiempo) : null
 const onTrack = delta !== null && delta <= 0
+const media = fitness?.prediccion.media ?? null
 const kmSemana = Math.round(runs.reduce((s, r) => s + r.km, 0) * 10) / 10
 const hoy = [...load].sort((a, b) => b.fecha.localeCompare(a.fecha))[0]
-const dias = Math.round((Date.parse(VALENCIA) - Date.now()) / 86400_000)
+const dias = diasParaObjetivo(runner)
 const rec = recovery?.porcentaje
 const ratio = hoy?.ratio
 
@@ -61,18 +65,18 @@ const preds = [
 <section class="stats">
   <div class="hero">
     <div class="kicker">
-      <p class="label">{estimado ? 'Estimación maratón · desde la media' : 'Predicción maratón'}</p>
-      <p class="days">{dias} días para Valencia</p>
+      <p class="label">{estimado ? `Estimación ${distancia} · interpolada` : `Predicción ${distancia}`}</p>
+      <p class="days">{dias} días para {objetivo.carrera}</p>
     </div>
 
     <div class="clocks">
       <div class="clock">
-        <p class="pixel huge">{maraton ?? '--:--:--'}</p>
-        <p class="cap">{estimado ? 'Riegel desde la media' : 'Estimación actual'}</p>
+        <p class="pixel huge">{tiempoCoros ?? '--:--:--'}</p>
+        <p class="cap">{estimado ? 'Riegel desde la distancia más cercana' : 'Estimación actual'}</p>
       </div>
       <div class="clock goal">
-        <p class="pixel target">{OBJETIVO}</p>
-        <p class="cap">Objetivo 6 dic</p>
+        <p class="pixel target">{objetivo.tiempo ?? 'Terminar'}</p>
+        <p class="cap">Objetivo {fechaCorta(objetivo.fecha)} · {tituloDistancia}</p>
       </div>
     </div>
 

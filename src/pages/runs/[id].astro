@@ -7,11 +7,16 @@ import RunCharts from '../../components/RunCharts.astro'
 import Team from '../../components/Team.astro'
 import { isCorosConnected } from '../../agent/coros/auth'
 import { getRunDetail, parsePace } from '../../agent/coros/data'
+import { readRunner } from '../../lib/runner'
 
 export const prerender = false
 
 const connected = isCorosConnected()
 if (!connected) return Astro.redirect('/')
+
+// Sin perfil, la portada enseña la bienvenida: el chat de sesión necesita saber para quién trabaja
+const runner = readRunner()
+if (!runner) return Astro.redirect('/')
 
 const id = Astro.params.id ?? ''
 if (!/^\d+$/.test(id)) return Astro.redirect('/')
@@ -89,7 +94,7 @@ const hrMark = (l: (typeof run.laps)[number]) => {
 <Layout title={`${run.nombre} · ${run.fecha} · midu.run`} description={`${run.nombre} ${run.km.toFixed(1)} km a ${run.ritmo}/km`}>
   <main class="app" data-mode="coach">
     <div class="chrome">
-      <Topbar connected={connected} />
+      <Topbar connected={connected} runner={runner} />
     </div>
     <div class="shell">
       <div class="content">
@@ -172,8 +177,8 @@ const hrMark = (l: (typeof run.laps)[number]) => {
       </div>
       <Chat
         runId={run.id}
-        hint="Habla de esta sesión: ritmo, vueltas y cómo encaja con Valencia."
-        suggestions={['¿Fue un ritmo sostenible?', '¿Qué dices de las vueltas?', '¿Cómo encaja esto con Valencia?']}
+        hint={`Habla de esta sesión: ritmo, vueltas y cómo encaja con ${runner.objetivo.carrera}.`}
+        suggestions={['¿Fue un ritmo sostenible?', '¿Qué dices de las vueltas?', `¿Cómo encaja esto con ${runner.objetivo.carrera}?`]}
       />
     </div>
   </main>

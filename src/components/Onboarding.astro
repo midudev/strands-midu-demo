@@ -1,0 +1,82 @@
+---
+// Bienvenida: COROS ya está conectado pero aún no sabemos quién corre. El mismo chat de siempre,
+// centrado, con el agente de onboarding: en cuanto guarda el perfil, la portada se monta.
+import { ONBOARDING_OPENER } from '../agent/prompts/onboarding'
+import Chat from './Chat.astro'
+---
+
+<section class="onboarding" id="onboarding">
+  <header class="intro">
+    <p class="label">Paso 1 de 1 · tu perfil</p>
+    <h1 class="pixel">Antes de nada,<br /><span class="accent">cuéntame de ti.</span></h1>
+    <p class="lead">
+      COROS ya me cuenta cómo entrenas. Falta lo que el reloj no sabe: quién eres, qué carrera preparas y a qué aspiras.
+      Con eso monto tu panel, tu equipo y tu plan.
+    </p>
+  </header>
+  <div class="stage">
+    <Chat
+      kind="onboarding"
+      variant="stage"
+      opener={ONBOARDING_OPENER}
+      hint="Cuéntamelo con tus palabras. Cuando tenga lo básico, lo guardo y pasamos a tu panel."
+      suggestions={[
+        'Me llamo Ana, preparo la media de Barcelona en febrero y quiero bajar de 1:45',
+        'Soy Marc, mi primer maratón es en abril y solo quiero terminarlo',
+        'Corro 4 días a la semana y tengo una molestia en el sóleo',
+      ]}
+    />
+  </div>
+</section>
+
+<style>
+  .onboarding {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 1rem;
+    width: 100%;
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 1.25rem;
+  }
+  .intro {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .label {
+    margin: 0;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 4.5vw, 2.8rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .accent {
+    color: var(--accent);
+  }
+  .lead {
+    margin: 0;
+    max-width: 38rem;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .stage {
+    min-height: 0;
+    display: flex;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 960px) {
+    .onboarding {
+      grid-template-rows: auto auto;
+    }
+    .stage {
+      height: min(70vh, 36rem);
+    }
+  }
+</style>

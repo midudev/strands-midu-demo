@@ -87,6 +87,7 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
           <li><i class="sw rodaje"></i>Rodaje</li>
           <li><i class="sw calidad"></i>Calidad</li>
           <li><i class="sw tirada"></i>Tirada</li>
+          <li><i class="sw descanso"></i>Descanso</li>
         </ul>
       </article>
     </div>
@@ -105,7 +106,7 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
   }
   interface Dia {
     fecha: string
-    tipo: 'suave' | 'rodaje' | 'calidad' | 'tirada'
+    tipo: 'descanso' | 'suave' | 'rodaje' | 'calidad' | 'tirada'
     km: number
     resumen: string
   }
@@ -138,7 +139,7 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
     'Decidiendo si hoy toca apretar…',
     'Dibujando la semana…',
     'Cuadrando la tirada larga…',
-    'Pensando en Valencia…',
+    'Pensando en el día de la carrera…',
   ]
   let fraseTimer: number | undefined
   function startFrases() {
@@ -482,6 +483,11 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
   }
   .briefing :global(.tirada) {
     background: var(--ok);
+  }
+  .briefing :global(.descanso) {
+    background: transparent;
+    outline: 1px dashed var(--line);
+    outline-offset: -1px;
   }
   .segments :global(.calentamiento .seg-km),
   .segments :global(.enfriamiento .seg-km) {

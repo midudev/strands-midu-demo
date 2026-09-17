@@ -3,19 +3,24 @@ interface Props {
   hint?: string
   suggestions?: string[]
   runId?: string
+  /** "onboarding": la conversación de bienvenida (misma UI, otro agente) */
+  kind?: 'coach' | 'onboarding'
+  /** "aside": panel lateral redimensionable (por defecto). "stage": tarjeta centrada, sin grip. */
+  variant?: 'aside' | 'stage'
+  /** Primer mensaje del coach, pintado por la web antes de que el usuario escriba (solo si no hay historial) */
+  opener?: string
 }
 const {
   hint = 'El hilo queda aquí. Pregunta y sigue cada herramienta al vuelo.',
-  suggestions = [
-    '¿Cómo llego de piernas esta semana?',
-    '¿Qué carrera me recomiendas antes de Valencia?',
-    'Plan para los próximos 3 días',
-  ],
+  suggestions = ['¿Cómo llego de piernas esta semana?', '¿Qué carrera me recomiendas?', 'Plan para los próximos 3 días'],
   runId,
+  kind = 'coach',
+  variant = 'aside',
+  opener,
 } = Astro.props
 ---
 
-<aside class="chat" id="chat" data-run-id={runId}>
+<aside class="chat" id="chat" data-run-id={runId} data-kind={kind} data-variant={variant}>
   <button
     class="grip"
     id="chat-resize"
@@ -42,6 +47,17 @@ const {
       </button>
     </div>
     <div class="log" id="chat-log" aria-live="polite">
+      {
+        opener && (
+          <div class="msg bot opener">
+            <div class="speaker">
+              <img class="avatar" src="/team/entrenador.webp" alt="" width="512" height="512" decoding="async" />
+              <span class="who pixel">Entrenador</span>
+            </div>
+            <span class="body">{opener}</span>
+          </div>
+        )
+      }
       <p class="hint">{hint}</p>
     </div>
     <form id="chat-form">
@@ -56,7 +72,7 @@ const {
 <script is:inline>
   (() => {
     const chat = document.getElementById('chat')
-    if (!chat || window.matchMedia('(max-width: 960px)').matches) return
+    if (!chat || chat.dataset.variant === 'stage' || window.matchMedia('(max-width: 960px)').matches) return
     const w = Number(localStorage.getItem('midu-chat-w'))
     if (Number.isFinite(w) && w >= 52) chat.style.width = `${w}px`
   })()
@@ -77,6 +93,7 @@ const {
     ver_preferencias: 'Leer preferencias (estado)',
     recordar: 'Guardar en memoria',
     buscar_en_memoria: 'Buscar en memoria',
+    guardar_perfil: 'Guardar perfil del corredor',
   }
   const TEAM: Record<string, string> = { fisio: 'Fisioterapeuta', nutricionista: 'Nutricionista' }
   const MANAGER: Record<string, string> = { 'sliding-window': 'ventana deslizante', summarizing: 'resumen' }
@@ -88,6 +105,16 @@ const {
   const ctxBtn = document.getElementById('chat-ctx') as HTMLButtonElement
   const ctxText = ctxBtn.querySelector('.ctx-text')!
   const runId = () => document.getElementById('chat')?.dataset.runId || undefined
+  const kind = () => document.getElementById('chat')?.dataset.kind || 'coach'
+  const isOnboarding = () => kind() === 'onboarding'
+  /** Parámetros que identifican el chat en /api/context: sesión concreta o bienvenida */
+  const contextQuery = () => {
+    const params = new URLSearchParams()
+    if (runId()) params.set('runId', runId()!)
+    if (isOnboarding()) params.set('kind', 'onboarding')
+    const query = params.toString()
+    return query ? `?${query}` : ''
+  }
 
   const label = (name: string) => TOOLS[name] ?? name
   const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`)
@@ -341,13 +368,15 @@ const {
   }
 
   // Al cargar: contexto + historial restaurado de la sesión en disco (SessionManager)
-  fetch(`/api/context${runId() ? `?runId=${runId()}` : ''}`)
+  fetch(`/api/context${contextQuery()}`)
     .then((r) => (r.ok ? r.json() : null))
     .then((ctx) => {
       if (!ctx) return
       const history: { role: string; text: string }[] = ctx.historial ?? []
       if (history.length) {
         log.querySelector('.hint')?.remove()
+        // Si la conversación ya empezó, el primer mensaje del coach ya no hace falta
+        log.querySelector('.opener')?.remove()
         const note = document.createElement('p')
         note.className = 'ctx-note restored'
         note.textContent = `Sesión ${ctx.sessionId} restaurada de disco · ${ctx.mensajes} mensajes`
@@ -363,7 +392,7 @@ const {
     ctxBtn.disabled = true
     ctxText.textContent = 'contexto · recortando…'
     try {
-      const res = await fetch('/api/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: runId() }) })
+      const res = await fetch('/api/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: runId(), kind: kind() }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? res.statusText)
       renderContext(data)
@@ -389,6 +418,19 @@ const {
     }
   })
 
+  // La bienvenida termina cuando el agente guarda el perfil: la portada se monta al recargar
+  let profileSaved: { nombre: string } | null = null
+  const goToDashboard = (runner: { nombre: string }) => {
+    const note = document.createElement('p')
+    note.className = 'ctx-note restored profile-saved'
+    note.textContent = `Perfil de ${runner.nombre} guardado. Preparando tu panel…`
+    log.append(note)
+    stick(true)
+    input.disabled = true
+    submit.disabled = true
+    window.setTimeout(() => window.location.assign('/'), 1400)
+  }
+
   async function send(message: string) {
     log.querySelector('.hint')?.remove()
     add('user', message)
@@ -400,7 +442,7 @@ const {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, runId: document.getElementById('chat')?.dataset.runId || undefined }),
+        body: JSON.stringify({ message, runId: runId(), kind: kind() }),
       })
       if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
       const reader = res.body.getReader()
@@ -437,6 +479,8 @@ const {
             endAgent(chunk.id, chunk.ms, chunk.ok !== false)
           } else if (chunk.type === 'context') {
             renderContext(chunk.context, chunk.cayeron)
+          } else if (chunk.type === 'profile') {
+            profileSaved = chunk.runner
           } else if (chunk.type === 'error') {
             if (!turn.bot) {
               hideThinking()
@@ -457,6 +501,7 @@ const {
       input.focus()
       // El panel de estado/memoria se refresca solo (la extracción de memoria corre en segundo plano)
       document.dispatchEvent(new CustomEvent('coach:turn'))
+      if (profileSaved) goToDashboard(profileSaved)
     }
   }
 
@@ -502,9 +547,12 @@ const {
     if (w > COLLAPSED) localStorage.setItem(KEY_OPEN, String(w))
   }
 
-  applyWidth(chatEl.getBoundingClientRect().width, false)
+  const resizable = chatEl.dataset.variant !== 'stage'
+
+  if (resizable) applyWidth(chatEl.getBoundingClientRect().width, false)
 
   grip.addEventListener('pointerdown', (e) => {
+    if (!resizable) return
     if (!desktop() || e.button !== 0) return
     e.preventDefault()
     try { grip.setPointerCapture(e.pointerId) } catch {}
@@ -528,11 +576,11 @@ const {
     grip.addEventListener('pointercancel', onUp)
   })
   grip.addEventListener('dblclick', () => {
-    if (!desktop()) return
+    if (!resizable || !desktop()) return
     applyWidth(chatEl.dataset.collapsed === 'true' ? lastOpen() : COLLAPSED)
   })
   grip.addEventListener('keydown', (e) => {
-    if (!desktop()) return
+    if (!resizable || !desktop()) return
     const w = chatEl.getBoundingClientRect().width
     const step = e.shiftKey ? 80 : 24
     if (e.key === 'ArrowLeft') { e.preventDefault(); applyWidth(w + step) }
@@ -542,6 +590,7 @@ const {
   })
   rail.addEventListener('click', () => applyWidth(lastOpen()))
   window.addEventListener('resize', () => {
+    if (!resizable) return
     if (!desktop()) {
       chatEl.style.width = ''
       delete chatEl.dataset.collapsed
@@ -570,6 +619,32 @@ const {
   }
   .chat.is-resizing {
     transition: none;
+  }
+  /* Tarjeta centrada (bienvenida): mismo chat, sin panel lateral ni redimensionado */
+  .chat[data-variant='stage'] {
+    width: 100%;
+    max-width: 44rem;
+    height: 100%;
+    margin: 0 auto;
+    border-left: 0;
+    border-inline: 1px solid var(--line);
+    container-type: normal;
+  }
+  .chat[data-variant='stage'] .grip,
+  .chat[data-variant='stage'] .rail {
+    display: none;
+  }
+  .chat[data-variant='stage'] .pane {
+    padding: 1.25rem 1.5rem 1.25rem;
+  }
+  .chat[data-variant='stage'] .log :global(.bot .body),
+  .chat[data-variant='stage'] .log :global(.msg) {
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+  .log :global(.profile-saved) {
+    color: var(--ok);
+    border-style: solid;
   }
   .grip {
     position: absolute;

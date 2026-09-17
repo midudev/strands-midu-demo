@@ -9,37 +9,45 @@ import Team from '../components/Team.astro'
 import Runs from '../components/Runs.astro'
 import Races from '../components/Races.astro'
 import Chat from '../components/Chat.astro'
+import Onboarding from '../components/Onboarding.astro'
 import { isCorosConnected } from '../agent/coros/auth'
 import { getDashboard, type Dashboard } from '../agent/coros/data'
 import { featuredRaces, getRaces, type Race } from '../lib/races'
 import { loadPredictions } from '../lib/predictions'
+import { readRunner } from '../lib/runner'
 
 export const prerender = false
 
 const connected = isCorosConnected()
 const corosStatus = Astro.url.searchParams.get('coros')
 
+// Tres estados: sin COROS (hero), con COROS pero sin perfil (bienvenida) y con todo (coach)
+const runner = connected ? readRunner() : null
+const ready = connected && runner !== null
+
 // Datos de COROS (llamadas MCP directas, sin LLM) y carreras (scraping cacheado), en paralelo
 const [dashboard, racesResult] = await Promise.all([
-  connected ? getDashboard().catch((err): Dashboard => ({ fitness: null, recovery: null, load: [], runs: [], errores: [String(err.message ?? err)] })) : null,
-  connected ? getRaces().catch(() => ({ fetchedAt: null, races: [] as Race[] })) : null,
+  ready ? getDashboard().catch((err): Dashboard => ({ fitness: null, recovery: null, load: [], runs: [], errores: [String(err.message ?? err)] })) : null,
+  ready ? getRaces().catch(() => ({ fetchedAt: null, races: [] as Race[] })) : null,
 ])
-const predictions = connected ? loadPredictions() : {}
+const predictions = ready ? loadPredictions() : {}
+
+const mode = !connected ? 'hero' : !runner ? 'onboarding' : 'coach'
 ---
 
 <Layout>
-  <main class="app" data-mode={connected && dashboard && racesResult ? 'coach' : 'hero'}>
+  <main class="app" data-mode={mode}>
     <div class="chrome">
-      <Topbar connected={connected} />
+      <Topbar connected={connected} runner={runner} />
       {corosStatus === 'error' && <p class="pixel flash warn">No se pudo conectar con COROS ({Astro.url.searchParams.get('motivo')}). Prueba de nuevo.</p>}
     </div>
 
     {
-      connected && dashboard && racesResult ? (
+      runner && dashboard && racesResult ? (
         <div class="shell">
           <div class="content">
             <div class="stack">
-              <Stats data={dashboard} />
+              <Stats data={dashboard} runner={runner} />
               {dashboard.errores.length > 0 && <p class="pixel flash warn">COROS: {dashboard.errores.join(' · ')}</p>}
               <Briefing runs={dashboard.runs} />
               <Team />
@@ -48,8 +56,16 @@ const predictions = connected ? loadPredictions() : {}
               <Races races={featuredRaces(racesResult.races)} predictions={predictions} connected={connected} fetchedAt={racesResult.fetchedAt} />
             </div>
           </div>
-          <Chat />
+          <Chat
+            suggestions={[
+              '¿Cómo llego de piernas esta semana?',
+              `¿Qué carrera me recomiendas antes de ${runner.objetivo.carrera}?`,
+              'Plan para los próximos 3 días',
+            ]}
+          />
         </div>
+      ) : connected ? (
+        <Onboarding />
       ) : (
         <Hero />
       )
@@ -62,6 +78,16 @@ const predictions = connected ? loadPredictions() : {}
     max-width: 52rem;
     margin: 0 auto;
     padding: 0 1rem 2rem;
+  }
+  .app[data-mode='onboarding'] {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .app[data-mode='onboarding'] .chrome {
+    flex-shrink: 0;
+    padding: 0 1.25rem;
   }
   .app[data-mode='coach'] {
     height: 100dvh;
@@ -108,6 +134,11 @@ const predictions = connected ? loadPredictions() : {}
   @media (max-width: 960px) {
     .app[data-mode='coach'] {
       height: auto;
+      overflow: visible;
+    }
+    .app[data-mode='onboarding'] {
+      height: auto;
+      min-height: 100dvh;
       overflow: visible;
     }
     .shell {
