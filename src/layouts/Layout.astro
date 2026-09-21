@@ -36,8 +36,6 @@ const { title = 'midu.run coach', description = 'Coach personal de running con S
     src: url('/fonts/GeistPixel-Square.woff2') format('woff2');
     font-weight: 500;
     font-display: swap;
-    /* Solo ASCII: los acentos de esta fuente se pintan como letras duplicadas */
-    unicode-range: U+0020-007E;
   }
 
   :root {
@@ -122,9 +120,11 @@ const { title = 'midu.run coach', description = 'Coach personal de running con S
     font-family: var(--font-pixel);
     font-weight: 500;
     letter-spacing: 0.01em;
-    /* Geist Pixel Square dibuja sombras/calt que duplican letras con acentos */
-    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+    /* mark/mkmk + composites de esta fuente duplican el acento; liga/ss01 cambian glifos */
+    font-feature-settings: 'liga' 0, 'dlig' 0, 'calt' 0, 'kern' 0, 'mark' 0, 'mkmk' 0, 'ss01' 0, 'ss02' 0;
     font-variant-ligatures: none;
+    font-kerning: none;
+    text-rendering: geometricPrecision;
   }
 
   .label {
@@ -146,7 +146,7 @@ const { title = 'midu.run coach', description = 'Coach personal de running con S
     border-radius: 0;
     font-family: var(--font-pixel);
     font-size: 0.85rem;
-    font-feature-settings: 'calt' 0, 'liga' 0, 'ss01' 0;
+    font-feature-settings: 'liga' 0, 'dlig' 0, 'calt' 0, 'kern' 0, 'mark' 0, 'mkmk' 0, 'ss01' 0, 'ss02' 0;
     font-variant-ligatures: none;
     text-decoration: none;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
