@@ -19,7 +19,7 @@ pnpm dev                 # http://localhost:4321
 1. Pulsa **Conectar COROS**: login OAuth integrado en la web (PKCE + registro dinámico de cliente). Los tokens se guardan en `.coros/auth.json` y el SDK los refresca solo.
 2. La portada carga tus datos de COROS (sin LLM), el coach genera el briefing del día y puedes predecir cualquier carrera o chatear con él.
 
-Modelo: OpenAI **GPT 5.6 Luna** (`OPENAI_MODEL`, por defecto `gpt-5.6-luna`) a través de `OpenAIModel` de Strands.
+Modelo: OpenAI **GPT 6 Luna** (`OPENAI_MODEL`, por defecto `gpt-6-luna`) a través de `OpenAIModel` de Strands.
 
 ## Qué hace la web
 
@@ -79,7 +79,7 @@ Regla del proyecto: **`src/agent/*.ts` es Strands** (lo que se escribe en el tal
 
 ```text
 src/agent/              STRANDS: lo que se escribe en el taller
-  model.ts              OpenAIModel (gpt-5.6-luna)
+  model.ts              OpenAIModel (gpt-6-luna)
   coach.ts              createCoach: Agent + tools (COROS por MCP, carreras, predicciones)
   briefing.ts           invoke con structuredOutputSchema
   guardrails.ts         hooks: corrige inputs, veta predicciones, registra tools
