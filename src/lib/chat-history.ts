@@ -1,5 +1,6 @@
 // Lectura del historial de un Agent para la web: qué hay en la ventana de conversación y el texto plano de cada turno.
 import type { Agent } from '@strands-agents/sdk'
+import { SESSION_ENABLED } from '../agent/session'
 
 /** Ventana del chat de portada. Pequeña a propósito: en el taller se ve cómo caen mensajes antiguos. */
 export const CHAT_WINDOW = 12
@@ -41,7 +42,7 @@ export function messageText(message: MessageLike): string {
 }
 
 export function contextInfo(chat: ChatLike): ContextInfo {
-  const isSliding = chat.kind !== 'run'
+  const isSliding = chat.kind !== 'run' || !SESSION_ENABLED
   const ventana = chat.kind === 'onboarding' ? ONBOARDING_WINDOW : CHAT_WINDOW
 
   return {

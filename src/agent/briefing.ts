@@ -9,6 +9,14 @@ import { createCoach } from './coach'
 import { briefingAsk } from './prompts/coach'
 import { Briefing } from './schema'
 
+type BriefingResult = Awaited<ReturnType<ReturnType<typeof createCoach>['invoke']>>
+export let briefingInvoke: ((coach: ReturnType<typeof createCoach>, ask: string) => Promise<BriefingResult>) | null = null
+// PASO 4 · Descomenta esta línea: salida validada con structuredOutputSchema.
+briefingInvoke = (coach, ask) =>
+  coach.invoke(ask, { structuredOutputSchema: Briefing })
+
+export const BRIEFING_ENABLED = briefingInvoke !== null
+
 /** El briefing de hoy: de caché si ya existe, generado por el coach si no (o si `refresh`). */
 export async function dailyBriefing({ refresh = false } = {}): Promise<StoredBriefing> {
   const cached = refresh ? null : readTodayBriefing()
@@ -24,8 +32,8 @@ export async function dailyBriefing({ refresh = false } = {}): Promise<StoredBri
   const coach = createCoach()
 
   try {
-    // structuredOutputSchema: el SDK obliga al modelo a devolver un objeto válido según el schema
-    const result = await coach.invoke(briefingAsk(fecha, dias, runner), { structuredOutputSchema: Briefing })
+    // PASO 4 · structuredOutputSchema: el SDK obliga al modelo a devolver un objeto válido según el schema.
+    const result = await briefingInvoke!(coach, briefingAsk(fecha, dias, runner))
 
     const briefing = saveBriefing({
       ...(result.structuredOutput as Briefing),

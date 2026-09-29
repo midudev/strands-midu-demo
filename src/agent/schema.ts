@@ -59,6 +59,7 @@ export const DiaPlan = z.object({
 
 export type DiaPlan = z.infer<typeof DiaPlan>
 
+// PASO 4: Schema que usamos para indicarle al agente cómo debe devolver la info
 export const Briefing = z.object({
   titular: z.string().max(90).describe('Una frase corta (máx. 12 palabras) sobre cómo llega el corredor hoy'),
   semaforo: z.enum(['apretar', 'controlar', 'suave']).describe('Veredicto del día según carga y recuperación'),

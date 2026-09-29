@@ -5,39 +5,40 @@
 import { SPECIALISTS } from '../agent/prompts/team'
 
 interface Props {
+  enabled?: boolean
   /** Sesión concreta: la opinión es sobre ella y se pide con un clic */
   runId?: string
   /** Qué miembros del equipo; por defecto todos */
   who?: string[]
   label?: string
 }
-const { runId, who, label = runId ? 'Lo que piensa el equipo · esta sesión' : 'Lo que piensa el equipo · hoy' } = Astro.props
+const { runId, who, enabled = true, label = runId ? 'Lo que piensa el equipo · esta sesión' : 'Lo que piensa el equipo · hoy' } = Astro.props
 const team = who ? SPECIALISTS.filter((s) => who.includes(s.id)) : SPECIALISTS
 const ondemand = Boolean(runId)
 ---
 
-<section class="team" id="team" data-run={runId} data-ondemand={ondemand ? '' : undefined}>
+<section class="team" id="team" data-run={runId} data-ondemand={ondemand ? '' : undefined} data-enabled={String(enabled)} aria-disabled={!enabled}>
   <div class="head">
     <p class="label">{label}</p>
-    <button class="btn ghost" id="team-refresh" type="button">{ondemand ? 'Pedir opinión' : 'Regenerar'}</button>
+    <button class="btn ghost" id="team-refresh" type="button" disabled={!enabled}>{ondemand ? 'Pedir opinión' : 'Regenerar'}</button>
   </div>
   <div class="rows">
     {
       team.map((s) => (
-        <article class="row" data-id={s.id} data-state={ondemand ? 'idle' : 'loading'}>
+        <article class="row" data-id={s.id} data-state={!enabled ? 'locked' : ondemand ? 'idle' : 'loading'}>
           <div class="side">
             <img class="avatar" src={s.avatar} alt="" width="512" height="512" loading="lazy" decoding="async" />
             <span class="pixel who">{s.nombre}</span>
-            <span class="pixel status"><i class="px" aria-hidden="true"><b /><b /><b /><b /></i><span class="ms">{ondemand ? 'A la espera' : 'Pensando'}</span></span>
+            <span class="pixel status"><i class="px" aria-hidden="true"><b /><b /><b /><b /></i><span class="ms">{!enabled ? 'Paso 6' : ondemand ? 'A la espera' : 'Pensando'}</span></span>
           </div>
           <div class="text">
             {ondemand && (
-              <button class="ask" type="button">
+              <button class="ask" type="button" disabled={!enabled}>
                 <span class="pixel">Pedir opinión</span>
                 <small>{s.nombre === 'Entrenador' ? 'Analiza esta sesión: ritmo, vueltas, FC y qué se lleva para tu objetivo.' : `Lectura de esta sesión desde su campo.`}</small>
               </button>
             )}
-            <div class="opinion"></div>
+            <div class="opinion">{enabled ? '' : 'Se activará al incorporar los especialistas como tools del coach.'}</div>
             <p class="thought" aria-live="polite" hidden></p>
           </div>
         </article>
@@ -225,10 +226,11 @@ const ondemand = Boolean(runId)
   btn.addEventListener('click', () => loadAll(true))
   cards.forEach((card) => card.querySelector('.ask')?.addEventListener('click', () => load(card, true)))
   // Bajo demanda: solo recuperamos lo que ya esté en caché; generar cuesta un clic.
-  loadAll(false, ondemand)
+  if (section.dataset.enabled === 'true') loadAll(false, ondemand)
 </script>
 
 <style>
+  .team[data-enabled='false'] { opacity: 0.72; }
   .team {
     padding: 2.5rem 0;
     border-top: 1px solid var(--line);
@@ -362,6 +364,11 @@ const ondemand = Boolean(runId)
   }
   .row[data-state='idle'] .ask {
     display: block;
+  }
+  .row[data-state='locked'] .ask {
+    display: block;
+    cursor: not-allowed;
+    opacity: 0.5;
   }
   .row[data-state='idle'] .px {
     background: var(--faint);

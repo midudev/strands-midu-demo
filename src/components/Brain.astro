@@ -1,31 +1,36 @@
 ---
 // Estado del agente (appState + sesión en disco) y memoria a largo plazo (ficheros markdown del FileMemoryStore).
 // Ambos se leen del servidor por /api/brain; el chat avisa (evento coach:turn) para refrescar tras cada turno.
+interface Props {
+  enabled?: boolean
+  memoryEnabled?: boolean
+}
+const { enabled = true, memoryEnabled = true } = Astro.props
 ---
 
-<section class="brain" id="brain">
+<section class="brain" id="brain" data-enabled={String(enabled)} data-memory-enabled={String(memoryEnabled)} aria-disabled={!enabled}>
   <div class="head">
     <p class="label">Cerebro del coach · estado y memoria</p>
     <div class="actions">
       <button class="btn ghost" id="brain-refresh" type="button" hidden>Actualizar</button>
-      <button class="pixel toggle" id="brain-toggle" type="button" aria-expanded="false" aria-controls="brain-cols">ver</button>
+      <button class="pixel toggle" id="brain-toggle" type="button" aria-expanded={String(!enabled)} aria-controls="brain-cols" disabled={!enabled}>{enabled ? 'ver' : 'Paso 8'}</button>
     </div>
   </div>
-  <div class="cols" id="brain-cols" hidden>
+  <div class="cols" id="brain-cols" hidden={enabled}>
     <article class="col">
       <p class="pixel sub">Estado del agente <span class="tip" title="agent.appState: datos que el modelo no ve en el contexto; los escriben las tools y la app. Se guardan con el snapshot de la sesión.">appState</span></p>
       <dl class="kv" id="brain-state">
-        <div><dt>turnos</dt><dd>…</dd></div>
+        <div><dt>turnos</dt><dd>{enabled ? '…' : 'Paso 8 · pendiente'}</dd></div>
       </dl>
       <p class="pixel sub">Preferencias <span class="tip" title="Las guarda la tool guardar_preferencia cuando se lo cuentas al coach.">tool</span></p>
-      <ul class="prefs" id="brain-prefs"><li class="empty">Dile al coach cosas como "mi tirada larga es el domingo".</li></ul>
+      <ul class="prefs" id="brain-prefs"><li class="empty">{enabled ? 'Dile al coach cosas como "mi tirada larga es el domingo".' : 'Las preferencias se activan con appState.'}</li></ul>
       <p class="pixel sub">Sesión <span class="tip" title="SessionManager + LocalFileStorage: snapshot del agente en disco tras cada invocación. Si reinicias el servidor, el chat sigue.">disco</span></p>
-      <p class="path" id="brain-session">…</p>
+      <p class="path" id="brain-session">{enabled ? '…' : 'Paso 8 · SessionManager pendiente'}</p>
     </article>
     <article class="col">
       <p class="pixel sub">Memoria a largo plazo <span class="tip" title="MemoryManager + FileMemoryStore: tras cada turno un extractor saca hechos duraderos y los guarda en markdown. Al empezar cada turno se inyectan los relevantes.">FileMemoryStore</span></p>
-      <div class="mem" id="brain-memory"><p class="empty">Todavía no recuerda nada. Cuéntale algo al coach (una molestia, un viaje) y vuelve en unos segundos.</p></div>
-      <p class="path" id="brain-memory-path">…</p>
+      <div class="mem" id="brain-memory"><p class="empty">{memoryEnabled ? 'Todavía no recuerda nada. Cuéntale algo al coach (una molestia, un viaje) y vuelve en unos segundos.' : 'Paso 9 · MemoryManager pendiente'}</p></div>
+      <p class="path" id="brain-memory-path">{memoryEnabled ? '…' : 'Paso 9 · FileMemoryStore pendiente'}</p>
     </article>
   </div>
 </section>
@@ -41,6 +46,7 @@
   const sessionEl = document.getElementById('brain-session')!
   const memEl = document.getElementById('brain-memory')!
   const memPathEl = document.getElementById('brain-memory-path')!
+  const memoryActive = document.getElementById('brain')?.dataset.memoryEnabled === 'true'
   const btn = document.getElementById('brain-refresh') as HTMLButtonElement
   const toggle = document.getElementById('brain-toggle') as HTMLButtonElement
   const cols = document.getElementById('brain-cols')!
@@ -63,6 +69,7 @@
       ? prefs.map(([k, v]) => `<li><span class="pixel k">${esc(k)}</span> ${esc(v)}</li>`).join('')
       : '<li class="empty">Dile al coach cosas como "mi tirada larga es el domingo".</li>'
     sessionEl.textContent = `${b.sesion.ruta}/`
+    if (!memoryActive) return
     memPathEl.textContent = `${b.memoria.ruta}/ · ${b.memoria.entradas.length} fichero${b.memoria.entradas.length === 1 ? '' : 's'}`
     const key = JSON.stringify(b.memoria.entradas)
     if (key !== lastKey) {
@@ -118,6 +125,7 @@
 </script>
 
 <style>
+  .brain[data-enabled='false'] { opacity: 0.72; }
   .brain {
     padding: 2.5rem 0;
     border-top: 1px solid var(--line);

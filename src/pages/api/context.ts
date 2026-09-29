@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { compressContext, getContext, type ChatTarget } from '../../agent/chat'
+import { workshop } from '../../agent/workshop'
 import { apiError, requireCoros, requireRunner, runIdOf } from '../../lib/api'
 
 export const prerender = false
@@ -24,6 +25,9 @@ function targetOf(runId: string | null | undefined, kind: string | null | undefi
  * cuántos mensajes hay, el resumen activo (si lo hay) y el historial legible.
  */
 export const GET: APIRoute = async ({ url }) => {
+  if (!workshop.chat && url.searchParams.get('kind') !== 'onboarding') {
+    return Response.json({ error: 'El chat se activa en el paso 1' }, { status: 501 })
+  }
   const notConnected = requireCoros()
   if (notConnected) return notConnected
 
@@ -49,6 +53,12 @@ export const POST: APIRoute = async ({ request }) => {
   if (notConnected) return notConnected
 
   const body = (await request.json().catch(() => ({}))) as ContextBody
+  if (!workshop.chat && body.kind !== 'onboarding') {
+    return Response.json({ error: 'El chat se activa en el paso 1' }, { status: 501 })
+  }
+  if (!workshop.session && body.kind !== 'onboarding') {
+    return Response.json({ error: 'La gestión del contexto se activa en el paso 8' }, { status: 501 })
+  }
   const target = targetOf(body.runId, body.kind)
   if (target instanceof Response) return target
 

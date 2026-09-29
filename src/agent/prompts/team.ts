@@ -29,6 +29,7 @@ export interface Specialist {
   prompt: (runner: RunnerProfile) => string
 }
 
+// PASO 6: Muestra la lista de especialistas que usaremos
 export const SPECIALISTS: Specialist[] = [
   {
     id: 'entrenador',

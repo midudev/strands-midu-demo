@@ -159,6 +159,44 @@ ${CHAT_RULES}
 `.trim()
 }
 
+/** El prompt acompaña a las tools que ya se han activado en el taller. */
+export function workshopHeadCoachPrompt(
+  runner: RunnerProfile,
+  ready: { mcp: boolean; races: boolean; predictions: boolean; team: boolean; state: boolean; memory: boolean },
+): string {
+  if (Object.values(ready).every(Boolean)) return headCoachPrompt(runner)
+
+  return [
+    `Eres el coach personal de running de ${runner.nombre}. Hablas en español, directo y breve.`,
+    runnerFacts(runner),
+    ready.mcp
+      ? 'Puedes consultar sus datos reales de COROS con las tools disponibles antes de opinar sobre cifras.'
+      : 'Todavía no tienes tools de COROS. No inventes entrenamientos, ritmos ni métricas; explica esa limitación si te piden datos.',
+    ready.races ? 'Puedes consultar próximas carreras con get_upcoming_races.' : '',
+    ready.predictions ? 'Puedes guardar una predicción con save_race_prediction; si un guardrail la frena, corrige el intento.' : '',
+    ready.team ? teamRules(runner) : '',
+    ready.state ? 'Usa guardar_preferencia y ver_preferencias para preferencias estables del corredor.' : '',
+    ready.memory ? 'Usa recordar y buscar_en_memoria cuando un hecho duradero sea relevante.' : '',
+    CHAT_RULES,
+  ].filter(Boolean).join('\n\n')
+}
+
+/** Versión del chat de sesión antes de que estén disponibles todas las capas. */
+export function workshopRunCoachPrompt(run: RunForPrompt, runner: RunnerProfile, ready: { mcp: boolean; team: boolean }): string {
+  if (ready.mcp && ready.team) return runCoachPrompt(run, runner)
+
+  return [
+    `Eres el coach personal de running de ${runner.nombre}. Esta conversación trata solo de esta sesión.`,
+    `Sesión:\n${runFacts(run)}`,
+    `Corredor:\n${runnerFacts(runner)}`,
+    ready.mcp
+      ? 'Si falta un dato, puedes consultar getActivityDetail o queryActivityLapData en COROS.'
+      : 'No tienes tools de COROS todavía. Usa solo los datos de la ficha y no inventes métricas.',
+    ready.team ? teamRules(runner) : '',
+    CHAT_RULES,
+  ].filter(Boolean).join('\n\n')
+}
+
 // --- Encargos ------------------------------------------------------------------------------
 
 /** Encargo del briefing diario (structured output). */

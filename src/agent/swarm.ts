@@ -45,6 +45,7 @@ function createSwarmAgent(def: SwarmAgentDef, runner: RunnerProfile): Agent {
   return agent
 }
 
+// PASO 7 · cuatro Agent coordinados por el Swarm; los handoffs se ven en la web.
 export function buildSwarm(runner: RunnerProfile): Swarm {
   return new Swarm({
     id: 'prediccion',
@@ -58,6 +59,11 @@ export function buildSwarm(runner: RunnerProfile): Swarm {
   })
 }
 
+export let swarmFactory: typeof buildSwarm | null = null
+// PASO 7 · Descomenta esta línea: cuatro agentes se pasan el testigo.
+swarmFactory = buildSwarm
+export const SWARM_ENABLED = swarmFactory !== null
+
 /** Predicción de una carrera con el enjambre, en streaming. Termina con { type: 'result' } si se guardó. */
 export async function* streamPrediction(race: Race): AsyncGenerator<SwarmChunk> {
   if (!isCorosConnected()) throw new Error('Conecta COROS para poder predecir carreras')
@@ -66,7 +72,7 @@ export async function* streamPrediction(race: Race): AsyncGenerator<SwarmChunk> 
   trace('swarm', `prediccion ${race.nombre}`, { raceId: race.id, fecha: race.fecha })
 
   const runner = requireRunnerProfile()
-  const swarm = buildSwarm(runner)
+  const swarm = swarmFactory!(runner)
   const translator = new SwarmEventTranslator()
 
   // El recorrido se acumula en invocationState para que las tools también puedan verlo

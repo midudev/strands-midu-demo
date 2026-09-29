@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { streamChat } from '../../agent/chat'
+import { workshop } from '../../agent/workshop'
 import { ndjson, requireCoros, requireRunner, runIdOf } from '../../lib/api'
 
 export const prerender = false
@@ -27,6 +28,9 @@ export const POST: APIRoute = async ({ request }) => {
   const body = (await request.json().catch(() => ({}))) as ChatBody
   const message = body.message?.trim()
   const onboarding = body.kind === 'onboarding'
+
+  // La bienvenida prepara el perfil incluso en el paso 0; el chat del coach empieza en el paso 1.
+  if (!onboarding && !workshop.chat) return Response.json({ error: 'El chat se activa en el paso 1' }, { status: 501 })
 
   if (!message) {
     return Response.json({ error: 'Falta message' }, { status: 400 })

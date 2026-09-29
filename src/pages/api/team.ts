@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro'
 
 import { isSpecialist, SPECIALISTS } from '../../agent/prompts/team'
 import { streamSpecialistTake } from '../../agent/team'
+import { workshop } from '../../agent/workshop'
 import { ndjson, requireReady, runIdOf } from '../../lib/api'
 
 export const prerender = false
@@ -17,6 +18,7 @@ export const prerender = false
  *   - cached: solo devuelve lo que ya haya guardado; si no hay nada, responde "idle".
  */
 export const GET: APIRoute = async ({ url }) => {
+  if (!workshop.team) return Response.json({ error: 'El equipo se activa en el paso 6' }, { status: 501 })
   const notReady = requireReady()
   if (notReady) return notReady
 

@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { streamPrediction } from '../../agent/swarm'
+import { workshop } from '../../agent/workshop'
 import { ndjson, requireReady } from '../../lib/api'
 import { getRaces } from '../../lib/races'
 
@@ -18,6 +19,7 @@ interface PredictBody {
  * Tipos de evento: node_start, tool_start, tool_end, handoff, result, error.
  */
 export const POST: APIRoute = async ({ request }) => {
+  if (!workshop.swarm) return Response.json({ error: 'El enjambre se activa en el paso 7' }, { status: 501 })
   const notReady = requireReady()
   if (notReady) return notReady
 

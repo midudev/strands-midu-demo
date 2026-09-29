@@ -1,17 +1,21 @@
 ---
 // El briefing lo genera el agente (structured output de Strands): semáforo, sesión de hoy por bloques
 // y plan de 7 días. La semana pasada sale de COROS (sin LLM) y se pinta en el servidor; el plan lo pide el cliente.
-import type { Run } from '../agent/coros/data'
+import type { Run } from "../agent/coros/data"
 
 interface Props {
   runs: Run[]
+  enabled?: boolean
 }
-const { runs } = Astro.props
+const { runs, enabled = true } = Astro.props
 
 const hoy = new Date().toISOString().slice(0, 10)
-const DIAS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
+const DIAS = ["D", "L", "M", "X", "J", "V", "S"]
 const diaSemana = (f: string) => DIAS[new Date(`${f}T12:00:00`).getDay()]
-const addDays = (f: string, n: number) => new Date(Date.parse(`${f}T12:00:00`) + n * 86400_000).toISOString().slice(0, 10)
+const addDays = (f: string, n: number) =>
+  new Date(Date.parse(`${f}T12:00:00`) + n * 86400_000)
+    .toISOString()
+    .slice(0, 10)
 
 // Últimos 7 días (sin hoy): km reales por día
 const pasado = Array.from({ length: 7 }, (_, i) => {
@@ -26,45 +30,83 @@ const futuro = Array.from({ length: 7 }, (_, i) => {
 const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
 ---
 
-<section class="briefing" id="briefing" data-hoy={hoy} data-max={maxPasado}>
+<section
+  class="briefing"
+  id="briefing"
+  data-hoy={hoy}
+  data-max={maxPasado}
+  data-enabled={String(enabled)}
+  aria-disabled={!enabled}
+>
   <div class="head">
     <p class="label">Briefing del coach · hoy</p>
     <div class="actions">
       <span class="semaforo pixel" data-tone="" hidden><i></i><b></b></span>
-      <button class="btn ghost" id="briefing-refresh" type="button">Regenerar</button>
+      <button
+        class="btn ghost"
+        id="briefing-refresh"
+        type="button"
+        disabled={!enabled}>Regenerar</button
+      >
     </div>
   </div>
 
-  <div class="body" data-state="loading">
-    <p class="pixel titular skeleton">Atándose las zapatillas…</p>
-    <p class="motivo"></p>
+  <div class="body" data-state={enabled ? "loading" : "locked"}>
+    <p class:list={["pixel", "titular", { skeleton: enabled }]}>
+      {enabled ? "Atándose las zapatillas…" : "PASO 4 · Briefing pendiente"}
+    </p>
+    <p class="motivo">
+      {
+        enabled
+          ? ""
+          : "La sesión de hoy y el plan semanal aparecerán al activar la salida estructurada."
+      }
+    </p>
 
     <div class="grid">
       <article class="card sesion">
         <div class="card-head">
           <p class="label">Sesión de hoy</p>
-          <p class="pixel total"><b class="km">—</b><span> km · </span><b class="tiempo">—</b></p>
+          <p class="pixel total">
+            <b class="km">—</b><span> km · </span><b class="tiempo">—</b>
+          </p>
         </div>
         <p class="nombre"></p>
-        <div class="segments" role="img" aria-label="Bloques de la sesión"></div>
+        <div class="segments" role="img" aria-label="Bloques de la sesión">
+        </div>
         <div class="pixels" aria-hidden="true">
-          {Array.from({ length: 48 }, (_, i) => <i style={`--d: ${((i * 37) % 48) * 45}ms`} />)}
+          {
+            Array.from({ length: 48 }, (_, i) => (
+              <i style={`--d: ${((i * 37) % 48) * 45}ms`} />
+            ))
+          }
         </div>
         <ul class="bloques"></ul>
       </article>
 
       <article class="card semana">
         <div class="card-head">
-          <p class="label">Hecho · <span class="plan-label">plan del coach</span></p>
-          <p class="pixel total"><b class="km-semana">—</b><span> km próximos 7 días</span></p>
+          <p class="label">
+            Hecho · <span class="plan-label">plan del coach</span>
+          </p>
+          <p class="pixel total">
+            <b class="km-semana">—</b><span> km próximos 7 días</span>
+          </p>
         </div>
         <div class="chart">
           <div class="cols">
             {
               pasado.map((d) => (
-                <div class="col hecho" data-km={d.km} data-tip={`${d.dia} · ${d.km ? `${d.km} km hechos` : 'sin salida'}`}>
-                  <span class="num"></span>
-                  <div class="bar" style={`--h: ${(d.km / maxPasado) * 100}%`} />
+                <div
+                  class="col hecho"
+                  data-km={d.km}
+                  data-tip={`${d.dia} · ${d.km ? `${d.km} km hechos` : "sin salida"}`}
+                >
+                  <span class="num" />
+                  <div
+                    class="bar"
+                    style={`--h: ${(d.km / maxPasado) * 100}%`}
+                  />
                   <span class="dia">{d.dia}</span>
                 </div>
               ))
@@ -72,10 +114,13 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
             <div class="divider" aria-hidden="true"></div>
             {
               futuro.map((d, i) => (
-                <div class:list={['col', 'plan', { today: i === 0 }]} data-fecha={d.fecha}>
-                  <span class="num"></span>
+                <div
+                  class:list={["col", "plan", { today: i === 0 }]}
+                  data-fecha={d.fecha}
+                >
+                  <span class="num" />
                   <div class="bar skeleton" style="--h: 35%" />
-                  <span class="dia">{i === 0 ? 'HOY' : d.dia}</span>
+                  <span class="dia">{i === 0 ? "HOY" : d.dia}</span>
                 </div>
               ))
             }
@@ -99,47 +144,58 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
 
 <script>
   interface Bloque {
-    tipo: 'calentamiento' | 'suave' | 'maraton' | 'umbral' | 'series' | 'enfriamiento'
+    tipo:
+      | "calentamiento"
+      | "suave"
+      | "maraton"
+      | "umbral"
+      | "series"
+      | "enfriamiento"
     km: number
     ritmo: string
     nota?: string
   }
   interface Dia {
     fecha: string
-    tipo: 'descanso' | 'suave' | 'rodaje' | 'calidad' | 'tirada'
+    tipo: "descanso" | "suave" | "rodaje" | "calidad" | "tirada"
     km: number
     resumen: string
   }
   interface Briefing {
     titular: string
-    semaforo: 'apretar' | 'controlar' | 'suave'
+    semaforo: "apretar" | "controlar" | "suave"
     motivo: string
     sesion: { nombre: string; bloques: Bloque[] }
     semana: Dia[]
     toolsUsadas?: string[]
   }
 
-  const root = document.getElementById('briefing')!
-  const $ = <T extends HTMLElement = HTMLElement>(sel: string) => root.querySelector<T>(sel)!
-  const body = $('.body')
-  const titular = $('.titular')
-  const motivo = $('.motivo')
-  const semaforo = $('.semaforo')
-  const tools = $('.tools')
-  const btn = $<HTMLButtonElement>('#briefing-refresh')
+  const root = document.getElementById("briefing")!
+  const $ = <T extends HTMLElement = HTMLElement>(sel: string) =>
+    root.querySelector<T>(sel)!
+  const body = $(".body")
+  const titular = $(".titular")
+  const motivo = $(".motivo")
+  const semaforo = $(".semaforo")
+  const tools = $(".tools")
+  const btn = $<HTMLButtonElement>("#briefing-refresh")
   const maxPasado = Number(root.dataset.max) || 1
 
-  const SEMAFORO = { apretar: 'Apretar', controlar: 'Controlar', suave: 'Suave' }
+  const SEMAFORO = {
+    apretar: "Apretar",
+    controlar: "Controlar",
+    suave: "Suave",
+  }
   const FRASES = [
-    'Atándose las zapatillas…',
-    'Calentando…',
-    'Mirando el cielo por si llueve…',
-    'Contando los kilómetros de la semana…',
-    'Afinando los ritmos…',
-    'Decidiendo si hoy toca apretar…',
-    'Dibujando la semana…',
-    'Cuadrando la tirada larga…',
-    'Pensando en el día de la carrera…',
+    "Atándose las zapatillas…",
+    "Calentando…",
+    "Mirando el cielo por si llueve…",
+    "Contando los kilómetros de la semana…",
+    "Afinando los ritmos…",
+    "Decidiendo si hoy toca apretar…",
+    "Dibujando la semana…",
+    "Cuadrando la tirada larga…",
+    "Pensando en el día de la carrera…",
   ]
   let fraseTimer: number | undefined
   function startFrases() {
@@ -154,17 +210,17 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
     window.clearInterval(fraseTimer)
   }
   const TIPO = {
-    calentamiento: 'Calentamiento',
-    suave: 'Suave',
-    maraton: 'Ritmo maratón',
-    umbral: 'Umbral',
-    series: 'Series',
-    enfriamiento: 'Enfriamiento',
+    calentamiento: "Calentamiento",
+    suave: "Suave",
+    maraton: "Ritmo maratón",
+    umbral: "Umbral",
+    series: "Series",
+    enfriamiento: "Enfriamiento",
   }
 
   const paceSecs = (r: string) => {
     const parts = r.split(/[–-]/).map((p) => {
-      const [m, s] = p.split(':').map(Number)
+      const [m, s] = p.split(":").map(Number)
       return m * 60 + (s || 0)
     })
     return parts.reduce((a, b) => a + b, 0) / parts.length
@@ -172,35 +228,36 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
   const fmtTime = (secs: number) => {
     const h = Math.floor(secs / 3600)
     const m = Math.round((secs % 3600) / 60)
-    return h ? `${h}h${String(m).padStart(2, '0')}` : `${m}'`
+    return h ? `${h}h${String(m).padStart(2, "0")}` : `${m}'`
   }
-  const fmtKm = (km: number) => (Number.isInteger(km) ? String(km) : km.toFixed(1))
-  const ritmoBonito = (r: string) => r.replace('-', '–')
+  const fmtKm = (km: number) =>
+    Number.isInteger(km) ? String(km) : km.toFixed(1)
+  const ritmoBonito = (r: string) => r.replace("-", "–")
 
-  function paintSesion({ nombre, bloques }: Briefing['sesion']) {
+  function paintSesion({ nombre, bloques }: Briefing["sesion"]) {
     const totalKm = bloques.reduce((s, b) => s + b.km, 0)
     const totalSecs = bloques.reduce((s, b) => s + b.km * paceSecs(b.ritmo), 0)
-    $('.sesion .km').textContent = fmtKm(totalKm)
-    $('.sesion .tiempo').textContent = `~${fmtTime(totalSecs)}`
-    $('.nombre').textContent = nombre
+    $(".sesion .km").textContent = fmtKm(totalKm)
+    $(".sesion .tiempo").textContent = `~${fmtTime(totalSecs)}`
+    $(".nombre").textContent = nombre
 
-    const segments = $('.segments')
+    const segments = $(".segments")
     segments.replaceChildren(
       ...bloques.map((b) => {
-        const seg = document.createElement('div')
+        const seg = document.createElement("div")
         seg.className = `seg ${b.tipo}`
         seg.style.flexGrow = String(b.km)
-        seg.dataset.tip = `${TIPO[b.tipo]} · ${fmtKm(b.km)} km a ${ritmoBonito(b.ritmo)}/km${b.nota ? ` · ${b.nota}` : ''}`
+        seg.dataset.tip = `${TIPO[b.tipo]} · ${fmtKm(b.km)} km a ${ritmoBonito(b.ritmo)}/km${b.nota ? ` · ${b.nota}` : ""}`
         seg.innerHTML = `<span class="seg-km pixel">${fmtKm(b.km)}</span>`
         return seg
       }),
     )
-    const lista = $('.bloques')
+    const lista = $(".bloques")
     lista.replaceChildren(
       ...bloques.map((b) => {
-        const li = document.createElement('li')
+        const li = document.createElement("li")
         li.innerHTML =
-          `<i class="sw ${b.tipo}"></i><span class="b-tipo"><strong>${TIPO[b.tipo]}</strong><em>${b.nota ?? ''}</em></span>` +
+          `<i class="sw ${b.tipo}"></i><span class="b-tipo"><strong>${TIPO[b.tipo]}</strong><em>${b.nota ?? ""}</em></span>` +
           `<b class="pixel">${fmtKm(b.km)} km</b><b class="pixel ritmo">${ritmoBonito(b.ritmo)}<small>/km</small></b>`
         return li
       }),
@@ -209,90 +266,105 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
 
   function paintSemana(semana: Dia[]) {
     const kmPlan = semana.reduce((s, d) => s + d.km, 0)
-    $('.km-semana').textContent = fmtKm(Math.round(kmPlan * 10) / 10)
+    $(".km-semana").textContent = fmtKm(Math.round(kmPlan * 10) / 10)
     const max = Math.max(maxPasado, ...semana.map((d) => d.km), 1)
-    root.querySelectorAll<HTMLElement>('.col.hecho').forEach((col) => {
+    root.querySelectorAll<HTMLElement>(".col.hecho").forEach((col) => {
       const km = Number(col.dataset.km) || 0
-      col.querySelector<HTMLElement>('.bar')!.style.setProperty('--h', `${(km / max) * 100}%`)
+      col
+        .querySelector<HTMLElement>(".bar")!
+        .style.setProperty("--h", `${(km / max) * 100}%`)
     })
-    root.querySelectorAll<HTMLElement>('.col.plan').forEach((col, i) => {
+    root.querySelectorAll<HTMLElement>(".col.plan").forEach((col, i) => {
       const d = semana[i]
-      const bar = col.querySelector<HTMLElement>('.bar')!
-      bar.className = `bar ${d?.tipo ?? ''}`
-      bar.style.setProperty('--h', `${d ? (d.km / max) * 100 : 0}%`)
-      col.querySelector('.num')!.textContent = d ? fmtKm(d.km) : ''
-      if (d) col.dataset.tip = `${col.querySelector('.dia')!.textContent} · ${d.resumen}`
+      const bar = col.querySelector<HTMLElement>(".bar")!
+      bar.className = `bar ${d?.tipo ?? ""}`
+      bar.style.setProperty("--h", `${d ? (d.km / max) * 100 : 0}%`)
+      col.querySelector(".num")!.textContent = d ? fmtKm(d.km) : ""
+      if (d)
+        col.dataset.tip = `${col.querySelector(".dia")!.textContent} · ${d.resumen}`
     })
   }
 
   function clearPlan() {
-    root.querySelectorAll<HTMLElement>('.col.plan').forEach((col) => {
-      const bar = col.querySelector<HTMLElement>('.bar')!
-      bar.className = 'bar skeleton'
-      bar.style.setProperty('--h', '35%')
-      col.querySelector('.num')!.textContent = ''
+    root.querySelectorAll<HTMLElement>(".col.plan").forEach((col) => {
+      const bar = col.querySelector<HTMLElement>(".bar")!
+      bar.className = "bar skeleton"
+      bar.style.setProperty("--h", "35%")
+      col.querySelector(".num")!.textContent = ""
       delete col.dataset.tip
     })
-    $('.segments').replaceChildren()
-    $('.bloques').replaceChildren()
-    $('.nombre').textContent = ''
-    $('.sesion .km').textContent = $('.sesion .tiempo').textContent = $('.km-semana').textContent = '—'
+    $(".segments").replaceChildren()
+    $(".bloques").replaceChildren()
+    $(".nombre").textContent = ""
+    $(".sesion .km").textContent =
+      $(".sesion .tiempo").textContent =
+      $(".km-semana").textContent =
+        "—"
   }
 
   async function load(refresh = false) {
-    body.dataset.state = 'loading'
+    body.dataset.state = "loading"
     btn.disabled = true
     semaforo.hidden = true
-    titular.classList.add('skeleton')
+    titular.classList.add("skeleton")
     startFrases()
-    motivo.textContent = tools.textContent = ''
+    motivo.textContent = tools.textContent = ""
     clearPlan()
     try {
-      const res = await fetch(`/api/briefing${refresh ? '?refresh' : ''}`)
+      // PASO 4: Aqui leemos el briefing del día desde la API
+      const res = await fetch(`/api/briefing${refresh ? "?refresh" : ""}`)
       const data: Briefing & { error?: string } = await res.json()
       if (!res.ok) throw new Error(data.error ?? res.statusText)
       titular.textContent = data.titular
       motivo.textContent = data.motivo
       semaforo.dataset.tone = data.semaforo
-      semaforo.querySelector('b')!.textContent = SEMAFORO[data.semaforo]
+      semaforo.querySelector("b")!.textContent = SEMAFORO[data.semaforo]
       semaforo.hidden = false
       paintSesion(data.sesion)
       paintSemana(data.semana)
-      tools.textContent = data.toolsUsadas?.length ? `TOOLS · ${data.toolsUsadas.join(' · ')}` : ''
-      body.dataset.state = 'ready'
+      tools.textContent = data.toolsUsadas?.length
+        ? `TOOLS · ${data.toolsUsadas.join(" · ")}`
+        : ""
+      body.dataset.state = "ready"
     } catch (err) {
-      titular.textContent = 'El coach no ha podido preparar el briefing.'
+      titular.textContent = "El coach no ha podido preparar el briefing."
       motivo.textContent = (err as Error).message
-      body.dataset.state = 'error'
+      body.dataset.state = "error"
     } finally {
       stopFrases()
-      titular.classList.remove('skeleton')
+      titular.classList.remove("skeleton")
       btn.disabled = false
     }
   }
 
   // Tooltip único para segmentos y barras
-  const tip = $('.tip')
-  root.addEventListener('pointerover', (e) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tip]')
+  const tip = $(".tip")
+  root.addEventListener("pointerover", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tip]")
     if (!el || !root.contains(el)) return
-    tip.textContent = el.dataset.tip ?? ''
+    tip.textContent = el.dataset.tip ?? ""
     tip.hidden = false
     const r = el.getBoundingClientRect()
     const base = body.getBoundingClientRect()
     tip.style.left = `${r.left + r.width / 2 - base.left}px`
     tip.style.top = `${r.top - base.top}px`
   })
-  root.addEventListener('pointerout', (e) => {
-    const el = (e.target as HTMLElement).closest('[data-tip]')
+  root.addEventListener("pointerout", (e) => {
+    const el = (e.target as HTMLElement).closest("[data-tip]")
     if (el) tip.hidden = true
   })
 
-  btn.addEventListener('click', () => load(true))
-  load()
+  btn.addEventListener("click", () => load(true))
+  if (root.dataset.enabled === "true") load()
 </script>
 
 <style>
+  .briefing[data-enabled="false"] {
+    opacity: 0.72;
+  }
+  .briefing[data-enabled="false"] .skeleton {
+    animation: none;
+  }
   .briefing {
     padding: 2.5rem 0;
     border-top: 1px solid var(--line);
@@ -325,15 +397,15 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
     background: var(--muted);
     box-shadow: 0 0 10px currentColor;
   }
-  .semaforo[data-tone='apretar'] i {
+  .semaforo[data-tone="apretar"] i {
     background: var(--ok);
     color: var(--ok);
   }
-  .semaforo[data-tone='controlar'] i {
+  .semaforo[data-tone="controlar"] i {
     background: var(--warn);
     color: var(--warn);
   }
-  .semaforo[data-tone='suave'] i {
+  .semaforo[data-tone="suave"] i {
     background: var(--accent);
     color: var(--accent);
   }
@@ -415,7 +487,7 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
     height: 44px;
     margin-top: -44px;
   }
-  .body[data-state='loading'] .pixels {
+  .body[data-state="loading"] .pixels {
     display: grid;
   }
   .pixels i {
@@ -439,11 +511,11 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
       background: var(--faint);
     }
   }
-  .body[data-state='loading'] .nombre {
+  .body[data-state="loading"] .nombre {
     color: var(--faint);
   }
-  .body[data-state='loading'] .nombre:empty::before {
-    content: 'Preparando la sesión…';
+  .body[data-state="loading"] .nombre:empty::before {
+    content: "Preparando la sesión…";
   }
   .segments :global(.seg) {
     position: relative;
@@ -589,7 +661,11 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
   .col.hecho .bar,
   .sw.hecho {
     background:
-      repeating-linear-gradient(135deg, var(--muted) 0 2px, transparent 2px 5px),
+      repeating-linear-gradient(
+        135deg,
+        var(--muted) 0 2px,
+        transparent 2px 5px
+      ),
       var(--bg-2);
     border: 1px solid var(--faint);
     border-bottom: 0;
@@ -658,7 +734,7 @@ const maxPasado = Math.max(...pasado.map((d) => d.km), 1)
     border-radius: 3px;
     pointer-events: none;
   }
-  .body[data-state='loading'] .card {
+  .body[data-state="loading"] .card {
     opacity: 0.7;
   }
   @media (max-width: 760px) {

@@ -43,11 +43,17 @@ export function createSpecialist(specialist: Specialist, runner: RunnerProfile):
 }
 
 /** Fisio y nutricionista como tools del coach del chat. El nombre de la tool es el id del especialista. */
+// PASO 6 · cada especialista pasa a ser una tool del coach.
 export function teamTools(runner: RunnerProfile): ToolList {
   return CHAT_SPECIALISTS.map((specialist) =>
     createSpecialist(specialist, runner).asTool({ name: specialist.id, description: specialist.descripcion }),
   )
 }
+
+export let chatTeamTools: typeof teamTools | null = null
+// PASO 6 · Descomenta esta línea: agent.asTool() incorpora especialistas al coach.
+chatTeamTools = teamTools
+export const TEAM_ENABLED = chatTeamTools !== null
 
 /**
  * La respuesta del especialista ya se ha pintado en el chat, con su cara, mientras la escribía.

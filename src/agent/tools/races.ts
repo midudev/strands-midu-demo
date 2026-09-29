@@ -1,5 +1,6 @@
 // tool() con schema Zod: una función normal con nombre, descripción y schema de entrada.
 // El modelo ve nombre, descripción y schema; el callback es código nuestro.
+// PASO 3 · la tool propia se expone al coach al descomentar su línea en coach.ts.
 import { tool } from '@strands-agents/sdk'
 import { z } from 'zod'
 

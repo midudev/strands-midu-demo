@@ -13,12 +13,29 @@ import { saveRacePrediction } from './tools/predictions'
 import { getUpcomingRaces } from './tools/races'
 
 /** El McpClient de COROS se pasa directamente en `tools`: el SDK lo conecta y expone sus tools al agente. */
-export function corosTools(): ToolList {
-  return isCorosConnected() ? [corosClient()] : []
-}
+const noCorosTools = (): ToolList => []
+export let corosTools = noCorosTools
+// PASO 2 · Descomenta esta línea: el McpClient entra en tools del Agent.
+corosTools = () => isCorosConnected() ? [corosClient()] : []
+export const MCP_ENABLED = corosTools !== noCorosTools
+
+let ownRaceTool: typeof getUpcomingRaces | null = null
+// PASO 3 · Descomenta esta línea: una tool() propia con schema Zod.
+ownRaceTool = getUpcomingRaces
+export const OWN_TOOL_ENABLED = ownRaceTool !== null
+
+const noGuardrails = (_agent: Agent) => {}
+export let installGuardrails = noGuardrails
+// PASO 5 · Descomenta esta línea: hooks del agente para validar y observar.
+installGuardrails = addGuardrails
+export const GUARDRAILS_ENABLED = installGuardrails !== noGuardrails
 
 export function coachTools(): ToolList {
-  return [...corosTools(), getUpcomingRaces, saveRacePrediction]
+  const tools: ToolList = [...corosTools()]
+  if (ownRaceTool) tools.push(ownRaceTool)
+  // La tool de guardado se muestra cuando también funcionan sus guardrails.
+  if (GUARDRAILS_ENABLED) tools.push(saveRacePrediction)
+  return tools
 }
 
 /** Un coach sin memoria de conversación: para invocaciones sueltas (briefing). El chat usa getChatAgent(). */
@@ -30,7 +47,7 @@ export function createCoach(systemPrompt = coachPrompt(requireRunnerProfile()), 
     printer: false, // no queremos que el SDK escriba en la consola del servidor
   })
 
-  addGuardrails(coach)
+  installGuardrails(coach)
 
   return coach
 }

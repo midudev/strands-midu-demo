@@ -8,6 +8,7 @@ import Team from '../../components/Team.astro'
 import { isCorosConnected } from '../../agent/coros/auth'
 import { getRunDetail, parsePace } from '../../agent/coros/data'
 import { readRunner } from '../../lib/runner'
+import { workshop } from '../../agent/workshop'
 
 export const prerender = false
 
@@ -153,7 +154,7 @@ const hrMark = (l: (typeof run.laps)[number]) => {
 
             <RunCharts series={run.series} laps={run.laps} ritmo={run.ritmo} fcMedia={run.fcMedia} />
 
-            <Team runId={run.id} who={['entrenador']} label="Opinión del entrenador · esta sesión" />
+            <Team runId={run.id} who={['entrenador']} label="Opinión del entrenador · esta sesión" enabled={workshop.team} />
 
             {
               run.laps.length > 0 && (
@@ -176,6 +177,8 @@ const hrMark = (l: (typeof run.laps)[number]) => {
         </div>
       </div>
       <Chat
+        enabled={workshop.chat}
+        contextEnabled={workshop.session}
         runId={run.id}
         hint={`Habla de esta sesión: ritmo, vueltas y cómo encaja con ${runner.objetivo.carrera}.`}
         suggestions={['¿Fue un ritmo sostenible?', '¿Qué dices de las vueltas?', `¿Cómo encaja esto con ${runner.objetivo.carrera}?`]}

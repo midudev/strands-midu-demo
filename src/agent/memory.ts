@@ -16,6 +16,7 @@ import { storage } from './session'
 /** Cuántos recuerdos se inyectan como máximo en cada turno. */
 const MAX_INJECTED_MEMORIES = 3
 
+// PASO 9 · chat.ts lo añade como memoryManager; los hechos quedan en markdown.
 export function createMemory(runner: RunnerProfile): MemoryManager {
   const store = new FileMemoryStore({
     name: MEMORY_STORE,
@@ -34,3 +35,8 @@ export function createMemory(runner: RunnerProfile): MemoryManager {
     injection: { trigger: 'userTurn', maxEntries: MAX_INJECTED_MEMORIES },
   })
 }
+
+export let memoryFactory: typeof createMemory | null = null
+// PASO 9 · Descomenta esta línea: MemoryManager extrae y recupera hechos.
+memoryFactory = createMemory
+export const MEMORY_ENABLED = memoryFactory !== null

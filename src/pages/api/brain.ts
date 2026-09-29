@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { getCoachState } from '../../agent/chat'
+import { workshop } from '../../agent/workshop'
 import { apiError, requireReady } from '../../lib/api'
 import { listMemory, MEMORY_DIR, STRANDS_DIR } from '../../lib/memory-files'
 
@@ -15,6 +16,7 @@ export const prerender = false
  * - memoria: los hechos a largo plazo que ha extraído el MemoryManager (ficheros markdown).
  */
 export const GET: APIRoute = async () => {
+  if (!workshop.session) return Response.json({ error: 'El cerebro se activa en el paso 8' }, { status: 501 })
   const notReady = requireReady()
   if (notReady) return notReady
 
@@ -30,7 +32,7 @@ export const GET: APIRoute = async () => {
       },
       memoria: {
         ruta: MEMORY_DIR,
-        entradas: listMemory(),
+        entradas: workshop.memory ? listMemory() : [],
       },
     })
   } catch (err) {

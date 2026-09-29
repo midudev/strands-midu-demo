@@ -15,6 +15,7 @@ import { getDashboard, type Dashboard } from '../agent/coros/data'
 import { featuredRaces, getRaces, type Race } from '../lib/races'
 import { loadPredictions } from '../lib/predictions'
 import { readRunner } from '../lib/runner'
+import { workshop } from '../agent/workshop'
 
 export const prerender = false
 
@@ -30,7 +31,7 @@ const [dashboard, racesResult] = await Promise.all([
   ready ? getDashboard().catch((err): Dashboard => ({ fitness: null, recovery: null, load: [], runs: [], errores: [String(err.message ?? err)] })) : null,
   ready ? getRaces().catch(() => ({ fetchedAt: null, races: [] as Race[] })) : null,
 ])
-const predictions = ready ? loadPredictions() : {}
+const predictions = ready && workshop.swarm ? loadPredictions() : {}
 
 const mode = !connected ? 'hero' : !runner ? 'onboarding' : 'coach'
 ---
@@ -49,14 +50,16 @@ const mode = !connected ? 'hero' : !runner ? 'onboarding' : 'coach'
             <div class="stack">
               <Stats data={dashboard} runner={runner} />
               {dashboard.errores.length > 0 && <p class="pixel flash warn">COROS: {dashboard.errores.join(' · ')}</p>}
-              <Briefing runs={dashboard.runs} />
-              <Team />
-              <Brain />
+              <Briefing runs={dashboard.runs} enabled={workshop.briefing} />
+              <Team enabled={workshop.team} />
+              <Brain enabled={workshop.session} memoryEnabled={workshop.memory} />
               <Runs runs={dashboard.runs} />
-              <Races races={featuredRaces(racesResult.races)} predictions={predictions} connected={connected} fetchedAt={racesResult.fetchedAt} />
+              <Races races={featuredRaces(racesResult.races)} predictions={predictions} connected={connected} predictEnabled={workshop.swarm} fetchedAt={racesResult.fetchedAt} />
             </div>
           </div>
           <Chat
+            enabled={workshop.chat}
+            contextEnabled={workshop.session}
             suggestions={[
               '¿Cómo llego de piernas esta semana?',
               `¿Qué carrera me recomiendas antes de ${runner.objetivo.carrera}?`,

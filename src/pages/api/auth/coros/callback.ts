@@ -11,7 +11,7 @@ const backToHome = (status: 'ok' | 'error', motivo?: string) =>
 /**
  * GET /api/auth/coros/callback?code=...&state=...
  *
- * Paso 2 del OAuth: COROS vuelve con el código de autorización.
+ * Segundo paso OAuth: COROS vuelve con el código de autorización.
  * Comprobamos el `state` (anti-CSRF) y cambiamos el código por tokens, que el provider guarda en disco.
  */
 export const GET: APIRoute = async ({ url, redirect }) => {

@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 
 import { dailyBriefing } from '../../agent/briefing'
+import { workshop } from '../../agent/workshop'
 import { apiError, requireReady } from '../../lib/api'
 
 export const prerender = false
@@ -12,6 +13,7 @@ export const prerender = false
  * con ?refresh se vuelve a generar aunque ya exista el de hoy.
  */
 export const GET: APIRoute = async ({ url }) => {
+  if (!workshop.briefing) return Response.json({ error: 'El briefing se activa en el paso 4' }, { status: 501 })
   const notReady = requireReady()
   if (notReady) return notReady
 

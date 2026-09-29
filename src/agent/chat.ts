@@ -33,16 +33,15 @@ import { readRunner, requireRunnerProfile, type RunnerProfile } from '../lib/run
 import { RUN_TEAM_FILE, TEAM_FILE } from '../lib/team-store'
 import { trace } from '../lib/trace'
 
-import { coachTools, corosTools } from './coach'
+import { coachTools, corosTools, GUARDRAILS_ENABLED, installGuardrails, MCP_ENABLED, OWN_TOOL_ENABLED } from './coach'
 import { getRunDetail } from './coros/data'
-import { addGuardrails } from './guardrails'
-import { createMemory } from './memory'
+import { memoryFactory, MEMORY_ENABLED } from './memory'
 import { model } from './model'
-import { headCoachPrompt, runCoachPrompt, summaryPrompt } from './prompts/coach'
+import { summaryPrompt, workshopHeadCoachPrompt, workshopRunCoachPrompt } from './prompts/coach'
 import { ONBOARDING_PROMPT } from './prompts/onboarding'
 import { isChatSpecialist } from './prompts/team'
-import { createSession } from './session'
-import { addTeamHook, teamTools } from './team'
+import { createSession, sessionFactory, SESSION_ENABLED } from './session'
+import { addTeamHook, chatTeamTools, TEAM_ENABLED } from './team'
 import { guardarPerfil } from './tools/runner'
 import { guardarPreferencia, readCoachState, verPreferencias } from './tools/state'
 
@@ -77,6 +76,15 @@ const runChats = new Map<string, ChatAgent>()
 
 // --- Construcción de los agentes -------------------------------------------------------
 
+// El Agent del chat se crea aquí. La misma fábrica sirve para la portada
+// y para el chat de una sesión; la bienvenida ya venía preparada para crear el perfil.
+// Mientras sea null, la UI enseña el chat desactivado y la API responde 501.
+type ChatAgentConfig = ConstructorParameters<typeof Agent>[0]
+export let makeChatAgent: ((config: ChatAgentConfig) => Agent) | null = null
+// PASO 1: Descomenta SOLO esta línea para activar el paso 1:
+makeChatAgent = (config) => new Agent(config)
+export const CHAT_ENABLED = makeChatAgent !== null
+
 /** El chat de portada. Un único agente: es el coach personal de una sola persona. */
 export function getChatAgent(): ChatAgent {
   if (coachChat) return coachChat
@@ -84,33 +92,59 @@ export function getChatAgent(): ChatAgent {
   const runner = requireRunnerProfile()
   const sessionId = 'coach-chat'
 
-  // Ventana deslizante: cuando hay más de CHAT_WINDOW mensajes, los más antiguos caen
+  // Conversación básica: conserva los últimos CHAT_WINDOW mensajes.
+  // En el paso 8 también añadiremos la sesión en disco.
   const manager = new SlidingWindowConversationManager({ windowSize: CHAT_WINDOW, shouldTruncateResults: true })
-  const memory = createMemory(runner)
+  // PASO 9: será undefined hasta descomentar memoryFactory en memory.ts.
+  const memory = memoryFactory?.(runner)
 
-  const agent = new Agent({
+  const agent = makeChatAgent!({
+    // Identidad del agente: separa su conversación de bienvenida y de las sesiones.
     id: 'coach',
     name: 'coach',
+    // PASO 1: el modelo genera la respuesta; el prompt fija su papel y sus límites.
     model,
-    systemPrompt: headCoachPrompt(runner),
-    tools: [...coachTools(), ...teamTools(runner), guardarPreferencia, verPreferencias],
+    systemPrompt: workshopHeadCoachPrompt(runner, {
+      mcp: MCP_ENABLED,
+      races: OWN_TOOL_ENABLED,
+      predictions: GUARDRAILS_ENABLED,
+      team: TEAM_ENABLED,
+      state: SESSION_ENABLED,
+      memory: MEMORY_ENABLED,
+    }),
+    // PASOS 2, 3 y 5: coachTools() incorpora COROS, carreras y guardado de predicciones.
+    // PASO 6: chatTeamTools añade fisio y nutricionista como agent.asTool().
+    // PASO 8: las tools de preferencias leen y escriben agent.appState.
+    tools: [
+      ...coachTools(),
+      ...(chatTeamTools?.(runner) ?? []),
+      ...(SESSION_ENABLED ? [guardarPreferencia, verPreferencias] : []),
+    ],
+    // PASO 1: gestiona la ventana corta de conversación mientras el servidor vive.
     conversationManager: manager,
-    sessionManager: createSession(sessionId),
+    // PASO 8: sessionFactory pasa de null a SessionManager y guarda el historial.
+    sessionManager: sessionFactory?.(sessionId),
+    // PASO 9: memoryFactory pasa de null a MemoryManager; recuerda hechos duraderos.
     memoryManager: memory,
+    // La web pinta el stream; evitamos que el SDK lo duplique en la consola.
     printer: false,
   })
 
-  addGuardrails(agent)
-  addTeamHook(agent, runner)
+  // PASO 5: este registro es inocuo hasta activar installGuardrails en coach.ts.
+  installGuardrails(agent)
+  // PASO 6: permite que la respuesta del especialista aparezca en el chat sin repetirse.
+  if (TEAM_ENABLED) addTeamHook(agent, runner)
 
-  // Estado del agente: contadores que la app mantiene fuera de la conversación (se persisten con la sesión)
-  agent.addHook(BeforeInvocationEvent, () => {
-    const turnos = (agent.appState.get('turnos') as number | undefined) ?? 0
+  // PASO 8: appState vive fuera del texto que ve el modelo y se persiste con la sesión.
+  if (SESSION_ENABLED) {
+    agent.addHook(BeforeInvocationEvent, () => {
+      const turnos = (agent.appState.get('turnos') as number | undefined) ?? 0
+      agent.appState.set('turnos', turnos + 1)
+      agent.appState.set('ultimaConsulta', new Date().toISOString())
+    })
+  }
 
-    agent.appState.set('turnos', turnos + 1)
-    agent.appState.set('ultimaConsulta', new Date().toISOString())
-  })
-
+  // PASO 8: initialize() restaurará el snapshot cuando exista SessionManager.
   const ready = agent.initialize().then(() => {
     trace('session', 'coach restaurado', {
       sessionId,
@@ -135,25 +169,29 @@ export async function getRunChatAgent(runId: string): Promise<ChatAgent> {
 
   const sessionId = `run-${runId}`
 
-  const manager = new SummarizingConversationManager({
-    model,
-    preserveRecentMessages: RUN_PRESERVE_RECENT,
-    summaryRatio: SUMMARY_RATIO,
-    summarizationSystemPrompt: summaryPrompt(runner),
-  })
+  // PASO 8 · en chats de sesión cambiamos ventana por resumen automático.
+  const manager = SESSION_ENABLED
+    ? new SummarizingConversationManager({
+        model,
+        preserveRecentMessages: RUN_PRESERVE_RECENT,
+        summaryRatio: SUMMARY_RATIO,
+        summarizationSystemPrompt: summaryPrompt(runner),
+      })
+    : new SlidingWindowConversationManager({ windowSize: CHAT_WINDOW, shouldTruncateResults: true })
 
-  const agent = new Agent({
+  // Usa la misma creación del PASO 1 para el chat de esta sesión concreta.
+  const agent = makeChatAgent!({
     id: sessionId,
     model,
-    systemPrompt: runCoachPrompt(run, runner),
-    tools: [...coachTools(), ...teamTools(runner)],
+    systemPrompt: workshopRunCoachPrompt(run, runner, { mcp: MCP_ENABLED, team: TEAM_ENABLED }),
+    tools: [...coachTools(), ...(chatTeamTools?.(runner) ?? [])],
     conversationManager: manager,
-    sessionManager: createSession(sessionId),
+    sessionManager: sessionFactory?.(sessionId),
     printer: false,
   })
 
-  addGuardrails(agent)
-  addTeamHook(agent, runner)
+  installGuardrails(agent)
+  if (TEAM_ENABLED) addTeamHook(agent, runner)
 
   const ready = agent.initialize().then(() => {
     trace('session', 'chat de sesión restaurado', { sessionId, mensajes: agent.messages.length })
@@ -186,7 +224,7 @@ export function getOnboardingAgent(): ChatAgent {
     printer: false,
   })
 
-  addGuardrails(agent)
+  installGuardrails(agent)
 
   agent.addHook(AfterToolCallEvent, (event) => {
     if (event.toolUse.name === 'guardar_perfil' && event.result.status === 'success') {
@@ -263,6 +301,7 @@ export async function* streamChat(message: string, target: ChatTarget = {}): Asy
   const runnerBefore: RunnerProfile | null = target.onboarding ? readRunner() : null
 
   try {
+    // PASO 1: Agent.stream() devuelve eventos; ChatEventTranslator los lleva a la UI.
     for await (const event of agent.stream(message)) {
       yield* translator.translate(event)
     }
@@ -312,7 +351,7 @@ export async function compressContext(target: ChatTarget = {}) {
 
   if (reducido) {
     // El Summarizing deja el resumen como primer mensaje: lo guardamos para enseñarlo
-    if (chat.kind === 'run') {
+    if (chat.kind === 'run' && SESSION_ENABLED) {
       chat.summary = messageText(agent.messages[0] ?? { content: [] }) || null
     }
 

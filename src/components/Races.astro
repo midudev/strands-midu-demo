@@ -7,9 +7,10 @@ interface Props {
   races: Race[]
   predictions: Record<string, StoredPrediction>
   connected: boolean
+  predictEnabled: boolean
   fetchedAt: string | null
 }
-const { races, predictions, connected, fetchedAt } = Astro.props
+const { races, predictions, connected, predictEnabled, fetchedAt } = Astro.props
 const fmt = new Intl.DateTimeFormat('es', { weekday: 'short', day: 'numeric', month: 'short' })
 const REC: Record<string, string> = { competir: 'Competir', tempo: 'Tempo', social: 'Social', evitar: 'Evitar' }
 const NAMES = Object.fromEntries(SWARM_AGENTS.map((a) => [a.id, a.nombre]))
@@ -27,8 +28,9 @@ const totalMs = (steps: SwarmStep[]) => steps.reduce((n, s) => n + s.ms, 0)
     {fetchedAt && <span class="pixel updated">Actualizado {new Date(fetchedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}</span>}
   </div>
   <p class="intro">
-    Cada predicción la decide un <b>enjambre</b> de cuatro agentes que se pasan el testigo: analista, optimista, conservador y árbitro.
-    Verás en vivo quién actúa, qué consulta y qué le dice al siguiente.
+    {predictEnabled ? (
+      <>Cada predicción la decide un <b>enjambre</b> de cuatro agentes que se pasan el testigo: analista, optimista, conservador y árbitro. Verás en vivo quién actúa, qué consulta y qué le dice al siguiente.</>
+    ) : 'Las predicciones con varios agentes se activan en el paso 7 del taller.'}
   </p>
 
   {races.length === 0 && <p class="empty">No se han podido cargar carreras. <a href="/api/races?refresh">Reintentar</a></p>}
@@ -94,8 +96,8 @@ const totalMs = (steps: SwarmStep[]) => steps.reduce((n, s) => n + s.ms, 0)
               </div>
             </div>
             <div class="action">
-              <button class="btn ghost predict" type="button" disabled={!connected} title={connected ? '' : 'Conecta COROS para predecir'}>
-                {p ? 'Repredecir' : 'Predecir'}
+              <button class="btn ghost predict" type="button" disabled={!connected || !predictEnabled} title={!predictEnabled ? 'Se activa en el paso 7' : connected ? '' : 'Conecta COROS para predecir'}>
+                {!predictEnabled ? 'Paso 7' : p ? 'Repredecir' : 'Predecir'}
               </button>
             </div>
           </li>

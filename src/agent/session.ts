@@ -13,6 +13,7 @@ export const storage = new LocalFileStorage(STRANDS_DIR)
  *
  * Ruta: data/strands/sessions/<sessionId>/scopes/agent/<agentId>/snapshots/snapshot_latest.json
  */
+// PASO 8 · chat.ts lo añade al Agent y llama initialize() para restaurar.
 export function createSession(sessionId: string): SessionManager {
   return new SessionManager({
     sessionId,
@@ -20,3 +21,8 @@ export function createSession(sessionId: string): SessionManager {
     saveLatestOn: 'invocation',
   })
 }
+
+export let sessionFactory: typeof createSession | null = null
+// PASO 8 · Descomenta esta línea: SessionManager guarda y restaura el Agent.
+sessionFactory = createSession
+export const SESSION_ENABLED = sessionFactory !== null

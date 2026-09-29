@@ -1,5 +1,7 @@
 ---
 interface Props {
+  enabled?: boolean
+  contextEnabled?: boolean
   hint?: string
   suggestions?: string[]
   runId?: string
@@ -11,6 +13,8 @@ interface Props {
   opener?: string
 }
 const {
+  enabled = true,
+  contextEnabled = true,
   hint = 'El hilo queda aquí. Pregunta y sigue cada herramienta al vuelo.',
   suggestions = ['¿Cómo llego de piernas esta semana?', '¿Qué carrera me recomiendas?', 'Plan para los próximos 3 días'],
   runId,
@@ -20,7 +24,7 @@ const {
 } = Astro.props
 ---
 
-<aside class="chat" id="chat" data-run-id={runId} data-kind={kind} data-variant={variant}>
+<aside class="chat" id="chat" data-run-id={runId} data-kind={kind} data-variant={variant} data-enabled={String(enabled)} aria-disabled={!enabled}>
   <button
     class="grip"
     id="chat-resize"
@@ -32,18 +36,19 @@ const {
     aria-valuemin="52"
     aria-valuemax="720"
     aria-valuenow="416"
+    disabled={!enabled}
     title="Arrastra para cambiar el tamaño. Doble clic para plegar."
   >
     <i aria-hidden="true"></i>
   </button>
   <div class="pane">
-    <button class="rail" id="chat-open" type="button" title="Abrir el chat" aria-expanded="true">
+    <button class="rail" id="chat-open" type="button" title="Abrir el chat" aria-expanded="true" disabled={!enabled}>
       <img class="face" src="/team/entrenador.webp" alt="" width="512" height="512" decoding="async" />
       <span class="pixel tag">Coach</span>
     </button>
     <div class="head">
-      <button class="pixel ctx" id="chat-ctx" type="button" title="Forzar al ConversationManager a recortar el historial ahora">
-        <span class="ctx-text">contexto · …</span>
+      <button class="pixel ctx" id="chat-ctx" type="button" disabled={!enabled || !contextEnabled} title={contextEnabled ? 'Forzar al ConversationManager a recortar el historial ahora' : 'Se activa en el paso 8'}>
+        <span class="ctx-text">{contextEnabled ? 'contexto · …' : 'contexto · paso 8'}</span>
       </button>
     </div>
     <div class="log" id="chat-log" aria-live="polite">
@@ -58,14 +63,14 @@ const {
           </div>
         )
       }
-      <p class="hint">{hint}</p>
+      <p class="hint">{enabled ? hint : 'PASO 1 · El chat se activará al crear el Agent.'}</p>
     </div>
     <form id="chat-form">
-      <input id="chat-input" type="text" name="message" placeholder="Escríbele al coach…" autocomplete="off" required />
-      <button class="btn" type="submit">Enviar</button>
+      <input id="chat-input" type="text" name="message" placeholder="Escríbele al coach…" autocomplete="off" required disabled={!enabled} />
+      <button class="btn" type="submit" disabled={!enabled}>Enviar</button>
     </form>
     <div class="chips">
-      {suggestions.map((s) => <button type="button" class="chip" data-msg={s}>{s}</button>)}
+      {suggestions.map((s) => <button type="button" class="chip" data-msg={s} disabled={!enabled}>{s}</button>)}
     </div>
   </div>
 </aside>
@@ -351,13 +356,14 @@ const {
   type Ctx = { manager: string; sessionId: string; mensajes: number; ventana: number | null; recientes: number | null; resumen: string | null }
 
   const renderContext = (ctx: Ctx, cayeron = 0) => {
+    if (ctxBtn.disabled) return
     const limit = ctx.ventana != null ? `/${ctx.ventana}` : ''
     ctxText.textContent = `contexto · ${ctx.mensajes}${limit} msgs · ${MANAGER[ctx.manager] ?? ctx.manager}`
     ctxBtn.classList.toggle('full', ctx.ventana != null && ctx.mensajes >= ctx.ventana)
     ctxBtn.classList.toggle('summary', Boolean(ctx.resumen))
     ctxBtn.title = ctx.resumen
       ? `Resumen activo:\n${ctx.resumen}`
-      : `Sesión ${ctx.sessionId} en disco. Click: forzar recorte del historial ahora.`
+      : `Chat ${ctx.sessionId}. Click: forzar recorte del historial ahora.`
     if (cayeron > 0) {
       const note = document.createElement('p')
       note.className = 'ctx-note'
@@ -368,7 +374,7 @@ const {
   }
 
   // Al cargar: contexto + historial restaurado de la sesión en disco (SessionManager)
-  fetch(`/api/context${contextQuery()}`)
+  if (document.getElementById('chat')?.dataset.enabled === 'true') fetch(`/api/context${contextQuery()}`)
     .then((r) => (r.ok ? r.json() : null))
     .then((ctx) => {
       if (!ctx) return
@@ -432,6 +438,7 @@ const {
   }
 
   async function send(message: string) {
+    if (document.getElementById('chat')?.dataset.enabled !== 'true') return
     log.querySelector('.hint')?.remove()
     add('user', message)
     const turn: Turn = { tools: null, bot: null }
@@ -602,6 +609,8 @@ const {
 </script>
 
 <style>
+  .chat[data-enabled='false'] { opacity: 0.76; }
+  .chat[data-enabled='false'] .hint { color: var(--accent); }
   .chat {
     position: relative;
     display: flex;
