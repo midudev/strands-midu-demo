@@ -1,5 +1,7 @@
 # midu.run coach 🏃
 
+> **Taller:** este repositorio arranca con las funciones de Strands desactivadas y visibles en la web. Sigue [STEPS.md](STEPS.md) para implementarlas en orden quitando un comentario por paso. El resto de este README describe la versión completa.
+
 <img width="3006" height="1704" alt="CleanShot 2026-09-17 at 09 30 03@2x" src="https://github.com/user-attachments/assets/0bfbb11a-c3a8-4bd6-ae97-115142f767e1" />
 <img width="2988" height="1696" alt="CleanShot 2026-09-17 at 09 30 14@2x" src="https://github.com/user-attachments/assets/6d154660-b339-47cd-8a5b-d72a05c3826c" />
 
